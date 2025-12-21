@@ -1,0 +1,17 @@
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+.idea/
+.vscode/
+go.work
+go.work.sum
+.env
+coverage.html
+gradebot
+
+# Dev container
+.devcontainer/.localstack

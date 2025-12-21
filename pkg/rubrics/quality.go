@@ -1,0 +1,137 @@
+package rubrics
+
+import (
+	"context"
+	_ "embed"
+	"fmt"
+	"io/fs"
+	"path/filepath"
+	"strings"
+	"unicode/utf8"
+
+	"connectrpc.com/connect"
+	"gopkg.in/yaml.v3"
+
+	pb "github.com/jh125486/gradebot/pkg/proto"
+	"github.com/jh125486/gradebot/pkg/proto/protoconnect"
+)
+
+// EvaluateQuality implements the same behavior as the old gRPC client wrapper.
+func EvaluateQuality(client protoconnect.QualityServiceClient, sourceFS fs.FS, instructions string) Evaluator {
+	return func(ctx context.Context, _ ProgramRunner, _ RunBag) RubricItem {
+		itemRubric := func(msg string, awarded float64) RubricItem {
+			return RubricItem{
+				Name:    "Quality",
+				Note:    msg,
+				Awarded: awarded,
+				Points:  20,
+			}
+		}
+
+		files, err := loadFiles(sourceFS)
+		if err != nil {
+			return itemRubric(fmt.Sprintf("Failed to prepare code for review: %v", err), 0)
+		}
+
+		req := connect.NewRequest(&pb.EvaluateCodeQualityRequest{
+			Instructions: instructions,
+			Files:        files,
+		})
+		resp, err := client.EvaluateCodeQuality(ctx, req)
+		if err != nil {
+			return itemRubric(fmt.Sprintf("Connect call failed: %v", err), 0)
+		}
+		awarded := float64(resp.Msg.QualityScore) / 100.0 * 20
+
+		return itemRubric(resp.Msg.Feedback, awarded)
+	}
+}
+
+//go:embed exclude.yaml
+var excludeYAML []byte
+
+func loadFiles(source fs.FS) ([]*pb.File, error) {
+	var config fileFilterConfig
+	if err := yaml.Unmarshal(excludeYAML, &config); err != nil {
+		return nil, fmt.Errorf("failed to decode filter config YAML: %w", err)
+	}
+
+	files := make([]*pb.File, 0)
+
+	walkFn := func(path string, entry fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+
+		if shouldSkipDir(path, entry, config.ExcludeDirectories) {
+			return fs.SkipDir
+		}
+
+		if entry.IsDir() {
+			return nil
+		}
+
+		if !config.shouldIncludeFile(path) {
+			return nil
+		}
+
+		content, err := fs.ReadFile(source, path)
+		if err != nil {
+			return err
+		}
+
+		if !utf8.Valid(content) {
+			return nil
+		}
+
+		files = append(files, &pb.File{
+			Name:    path,
+			Content: string(content),
+		})
+		return nil
+	}
+
+	if err := fs.WalkDir(source, ".", walkFn); err != nil {
+		return nil, err
+	}
+
+	return files, nil
+}
+
+func shouldSkipDir(path string, entry fs.DirEntry, excludeDirs []string) bool {
+	if !entry.IsDir() {
+		return false
+	}
+
+	dirName := entry.Name()
+	for _, excludeDir := range excludeDirs {
+		if dirName == excludeDir || path == excludeDir {
+			return true
+		}
+	}
+
+	return false
+}
+
+// fileFilterConfig represents the configuration for including/excluding files
+type fileFilterConfig struct {
+	IncludeExtensions  []string `yaml:"include_extensions"`
+	ExcludeDirectories []string `yaml:"exclude_directories"`
+}
+
+// shouldIncludeFile determines if a file should be included based on the config
+func (c *fileFilterConfig) shouldIncludeFile(path string) bool {
+	// Check if it has an extension we want to include
+	ext := strings.ToLower(filepath.Ext(path))
+	if ext == "" {
+		return false // No extension, not allowed for code quality
+	}
+
+	for _, includeExt := range c.IncludeExtensions {
+		if strings.EqualFold(ext, includeExt) {
+			return true
+		}
+	}
+
+	return false
+}
