@@ -4,31 +4,6 @@ on:
     tags: ["v*"]
 
 jobs:
-  # --- GoReleaser --- client
-  release:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: '1.24'
-          cache: true
-
-      - name: GoReleaser
-        uses: goreleaser/goreleaser-action@v6
-        with:
-          version: latest
-          args: release --clean
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          BUILD_ID: ${{ secrets.BUILD_ID }}
-
   # --- Deploy to Koyeb --- server
   deploy:
     runs-on: ubuntu-latest
@@ -52,21 +27,6 @@ jobs:
         with:
           secret-name: DATABASE_URL
           secret-value: "${{ secrets.DATABASE_URL }}"
-      - name: Create R2 Endpoint secret
-        uses: koyeb/action-git-deploy/secret@v1
-        with:
-          secret-name: R2_ENDPOINT
-          secret-value: "${{ secrets.R2_ENDPOINT }}"
-      - name: Create AWS Access Key ID secret
-        uses: koyeb/action-git-deploy/secret@v1
-        with:
-          secret-name: AWS_ACCESS_KEY_ID
-          secret-value: "${{ secrets.AWS_ACCESS_KEY_ID }}"
-      - name: Create AWS Secret Access Key secret
-        uses: koyeb/action-git-deploy/secret@v1
-        with:
-          secret-name: AWS_SECRET_ACCESS_KEY
-          secret-value: "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
       - name: Deploy to Koyeb
         uses: koyeb/action-git-deploy@v1
         with:
