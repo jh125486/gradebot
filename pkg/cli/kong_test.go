@@ -3,9 +3,9 @@ package cli_test
 import (
 	"context"
 	"encoding/hex"
-	"os"
 	"testing"
 
+	"github.com/alecthomas/kong"
 	"github.com/jh125486/gradebot/pkg/cli"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -83,7 +83,7 @@ func TestNewKongContext(t *testing.T) {
 			t.Parallel()
 
 			// Pass empty args to avoid parsing test flags from os.Args
-			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.id, tt.args.cli, []string{})
+			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.id, tt.args.cli, []string{}, kong.Exit(func(int) {}))
 
 			require.NotNil(t, kctx, "Kong context should be created")
 			assert.NotNil(t, kctx.Model, "Model should be set")
@@ -129,11 +129,11 @@ func TestNewKongContext_ErrorPaths(t *testing.T) {
 
 				if tt.wantPanic {
 					assert.Panics(t, func() {
-						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{})
+						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{}, kong.Exit(func(int) {}))
 					})
 				} else {
 					assert.NotPanics(t, func() {
-						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{})
+						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{}, kong.Exit(func(int) {}))
 						assert.NotNil(t, kctx)
 					})
 				}
@@ -180,125 +180,17 @@ func TestNewKongContext_ErrorPaths(t *testing.T) {
 
 				if tt.wantPanic {
 					assert.Panics(t, func() {
-						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args)
+						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args, kong.Exit(func(int) {}))
 					})
 				} else {
 					assert.NotPanics(t, func() {
-						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args)
+						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args, kong.Exit(func(int) {}))
 						assert.NotNil(t, kctx)
 					})
 				}
 			})
 		}
 	})
-}
-
-func TestNewServerContext(t *testing.T) {
-	// Note: NewServerContext uses kong.Parse() which reads os.Args by default.
-	// We test it with a modified os.Args to avoid test flag conflicts.
-
-	type testCLI struct {
-		Help bool `help:"Show help"`
-	}
-
-	type args struct {
-		ctx  context.Context
-		name string
-		id   [32]byte
-	}
-	tests := []struct {
-		name   string
-		args   args
-		osArgs []string
-	}{
-		{
-			name: "creates_server_context",
-			args: args{
-				ctx:  context.Background(),
-				name: "gradebot",
-				id:   [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
-			},
-			osArgs: []string{"gradebot"},
-		},
-		{
-			name: "binds_context_and_buildid",
-			args: args{
-				ctx:  context.WithValue(context.Background(), contextKey("server-key"), "server-value"),
-				name: "test-server",
-				id:   [32]byte{0xDE, 0xAD, 0xBE, 0xEF},
-			},
-			osArgs: []string{"test-server"},
-		},
-		{
-			name: "zero_build_id",
-			args: args{
-				ctx:  context.Background(),
-				name: "server",
-				id:   [32]byte{},
-			},
-			osArgs: []string{"server"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Cannot run in parallel due to os.Args manipulation
-
-			// Temporarily replace os.Args to avoid test flag conflicts
-			origArgs := os.Args
-			defer func() { os.Args = origArgs }()
-			os.Args = tt.osArgs
-
-			cliStruct := &testCLI{}
-			kctx := cli.NewServerContext(tt.args.ctx, tt.args.name, tt.args.id, cliStruct)
-
-			require.NotNil(t, kctx, "Kong context should be created")
-			assert.NotNil(t, kctx.Model, "Model should be set")
-
-			// Verify hex encoding is correct
-			expectedHex := hex.EncodeToString(tt.args.id[:])
-			assert.Len(t, expectedHex, 64, "Build ID should be 64 hex characters")
-		})
-	}
-}
-
-func TestNewServerContext_ErrorPaths(t *testing.T) {
-	tests := []struct {
-		name      string
-		cli       any
-		wantPanic bool
-		osArgs    []string
-	}{
-		{
-			name:      "invalid_cli_type_causes_panic",
-			cli:       "not a struct pointer",
-			wantPanic: true,
-			osArgs:    []string{"test"},
-		},
-		{
-			name:      "nil_cli_causes_panic",
-			cli:       nil,
-			wantPanic: true,
-			osArgs:    []string{"test"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			// Cannot run in parallel due to os.Args manipulation
-
-			// Temporarily replace os.Args
-			origArgs := os.Args
-			defer func() { os.Args = origArgs }()
-			os.Args = tt.osArgs
-
-			if tt.wantPanic {
-				assert.Panics(t, func() {
-					cli.NewServerContext(context.Background(), "test", [32]byte{}, tt.cli)
-				})
-			}
-		})
-	}
 }
 
 func TestContext_Wrapping(t *testing.T) {
