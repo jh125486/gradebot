@@ -15,7 +15,8 @@ import (
 )
 
 func TestServerCmd_AfterApply(t *testing.T) {
-	t.Parallel()
+	// Cannot run subtests in parallel - they share the same PostgreSQL database
+	// and create the same schema, causing "duplicate key value violates unique constraint" errors
 
 	type args struct {
 		databaseURL    string
@@ -127,8 +128,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
+			// Cannot run in parallel - tests share same database
 			if tt.setup != nil {
 				tt.setup(t)
 			}
