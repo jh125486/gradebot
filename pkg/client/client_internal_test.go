@@ -52,19 +52,15 @@ func TestDirectoryError_getPermissionHelp(t *testing.T) {
 }
 
 func TestDefaultTLSTransport(t *testing.T) {
-	t.Parallel()
+	// Don't run this test in parallel - it modifies http.DefaultTransport global state
 
 	t.Run("clones_default_transport", func(t *testing.T) {
-		t.Parallel()
-
 		transport := defaultTLSTransport()
 		assert.NotNil(t, transport)
 		assert.NotNil(t, transport.TLSClientConfig)
 	})
 
 	t.Run("fallback_when_type_assertion_fails", func(t *testing.T) {
-		t.Parallel()
-
 		// Save and restore default transport
 		originalTransport := http.DefaultTransport
 		defer func() { http.DefaultTransport = originalTransport }()

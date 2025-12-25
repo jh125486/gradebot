@@ -116,16 +116,10 @@ type AuthTransport struct {
 }
 
 // NewAuthTransport creates a new AuthTransport with the given token.
-// If base is nil, http.DefaultTransport is used.
+// If base is nil, defaultTLSTransport() is used.
 func NewAuthTransport(token string, base http.RoundTripper) *AuthTransport {
 	if base == nil {
 		base = defaultTLSTransport()
-	} else {
-		if transport, ok := base.(*http.Transport); ok {
-			clone := transport.Clone()
-			clone.TLSClientConfig = clientTLSConfig()
-			base = clone
-		}
 	}
 	return &AuthTransport{
 		base:  base,
