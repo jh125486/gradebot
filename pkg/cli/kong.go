@@ -13,16 +13,15 @@ type Context struct {
 	context.Context
 }
 
-// NewKongContext creates and configures a Kong parser context for a CLI application.
-// It binds the provided context and build ID for use in command execution.
-// Pass nil for args to use os.Args (typical for production), or provide custom args for testing.
-func NewKongContext(ctx context.Context, name string, id [32]byte, cli any, args []string) *kong.Context {
+// NewKongContext creates a Kong context with required params.
+func NewKongContext(ctx context.Context, name string, id [32]byte, cli any, args []string, opts ...kong.Option) *kong.Context {
 	buildID := hex.EncodeToString(id[:])
-	parser, err := kong.New(cli,
+	opts = append(opts,
 		kong.Name(name),
 		kong.UsageOnError(),
-		kong.Bind(Context{ctx}, buildID),
+		kong.Bind(Context{Context: ctx}, buildID),
 	)
+	parser, err := kong.New(cli, opts...)
 	if err != nil {
 		panic(err)
 	}
@@ -31,17 +30,6 @@ func NewKongContext(ctx context.Context, name string, id [32]byte, cli any, args
 		parser.Errorf("%s", err)
 		panic(err)
 	}
-	return kctx
-}
 
-// NewServerContext creates a Kong context specifically for the server application.
-// This is in the client package because it's a CLI adapter concern, not application logic.
-func NewServerContext(ctx context.Context, name string, id [32]byte, cli any) *kong.Context {
-	buildID := hex.EncodeToString(id[:])
-	return kong.Parse(cli,
-		kong.Name(name),
-		kong.UsageOnError(),
-		kong.Exit(func(int) {}), // Prevent os.Exit() in tests
-		kong.Bind(Context{Context: ctx}, buildID),
-	)
+	return kctx
 }

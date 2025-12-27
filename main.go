@@ -29,7 +29,7 @@ func main() {
 	defer stop()
 
 	var cliApp app.CLI
-	if err := cli.NewServerContext(ctx, "gradebot", sha256.Sum256([]byte(buildID)), &cliApp).
+	if err := cli.NewKongContext(ctx, "gradebot", sha256.Sum256([]byte(buildID)), &cliApp, os.Args[1:]).
 		Run(ctx); err != nil {
 		log.Fatalf("Failed to execute command: %v", err)
 	}

@@ -113,9 +113,10 @@ func TestSafeBufferConcurrentWrites(t *testing.T) {
 
 // TestSafeBufferConcurrentReadWrites tests concurrent reads and writes
 func TestSafeBufferConcurrentReadWrites(t *testing.T) {
-	var sb rubrics.SafeBuffer
-	var wg sync.WaitGroup
-
+	var (
+		sb rubrics.SafeBuffer
+		wg sync.WaitGroup
+	)
 	// Launch writers
 	numWriters := 50
 	for range numWriters {

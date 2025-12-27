@@ -1,6 +1,8 @@
 module github.com/jh125486/gradebot
 
-go 1.25.5
+go 1.25
+
+toolchain go1.25.0
 
 require (
 	connectrpc.com/connect v1.19.1
