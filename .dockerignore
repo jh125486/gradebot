@@ -1,0 +1,44 @@
+# Git
+.git
+.gitignore
+.gitattributes
+.githooks
+
+# CI/CD
+.github
+.codecov.yml
+.goreleaser.yml
+
+# Development
+.devcontainer
+.vscode
+.env
+.env.example
+
+# Documentation
+README.md
+LICENSE
+
+# Test files
+*_test.go
+coverage.out
+client_coverage.out
+**/*.test
+
+# Build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+gradebot
+
+# SonarQube
+sonar-project.properties
+.scannerwork
+
+# IDE
+.idea
+*.swp
+*.swo
+*~
