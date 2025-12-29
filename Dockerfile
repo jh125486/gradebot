@@ -6,6 +6,9 @@ RUN apk add --no-cache git ca-certificates
 
 WORKDIR /build
 
+# Port configuration aligns with Kong CLI defaults
+ARG PORT=8080
+
 # Copy go mod files
 COPY go.mod go.sum ./
 RUN go mod download
@@ -21,7 +24,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     ./main.go
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3
+
+# Re-declare port for runtime stage and set as environment variable
+ARG PORT=8080
+ENV PORT=${PORT}
 
 # Install runtime dependencies
 RUN apk --no-cache add ca-certificates tzdata
@@ -38,12 +45,11 @@ RUN addgroup -g 1000 gradebot && \
 
 USER gradebot
 
-# Expose port (adjust if needed)
-EXPOSE 8080
+EXPOSE ${PORT}
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/ || exit 1
+    CMD wget --no-verbose --tries=1 --spider "http://localhost:${PORT}/" || exit 1
 
 # Run the application
-CMD ["./gradebot", "server"]
+CMD ["./gradebot"]

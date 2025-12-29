@@ -13,10 +13,10 @@ import (
 type (
 	// CLI defines the command-line interface structure for the gradebot server application.
 	CLI struct {
-		Port           string `default:"8080"              help:"Port to listen on"                   name:"port"`
+		Port           string `default:"8080"              env:"PORT"                                 help:"Port to listen on" name:"port"`
 		DatabaseURL    string `env:"DATABASE_URL"          help:"PostgreSQL database URL"             name:"database-url"`
 		R2Endpoint     string `env:"R2_ENDPOINT"           help:"R2/S3 endpoint URL"                  name:"r2-endpoint"`
-		R2Region       string `default:"auto"              env:"AWS_REGION"                           help:"AWS region"     name:"r2-region"`
+		R2Region       string `default:"auto"              env:"AWS_REGION"                           help:"AWS region"        name:"r2-region"`
 		R2Bucket       string `env:"R2_BUCKET"             help:"R2/S3 bucket name"                   name:"r2-bucket"`
 		R2AccessKey    string `env:"AWS_ACCESS_KEY_ID"     help:"AWS access key ID"                   name:"r2-access-key"`
 		R2SecretKey    string `env:"AWS_SECRET_ACCESS_KEY" help:"AWS secret access key"               name:"r2-secret-key"`
