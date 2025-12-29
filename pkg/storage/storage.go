@@ -15,8 +15,9 @@ const (
 
 // ListResultsParams holds pagination parameters for ListResults
 type ListResultsParams struct {
-	Page     int // 1-indexed page number
-	PageSize int // Number of results per page
+	Page     int    // 1-indexed page number
+	PageSize int    // Number of results per page
+	Project  string // Optional: filter by project name
 }
 
 // Validate normalizes and validates pagination parameters.
@@ -54,5 +55,6 @@ type Storage interface {
 	SaveResult(ctx context.Context, result *proto.Result) error
 	LoadResult(ctx context.Context, submissionID string) (*proto.Result, error)
 	ListResultsPaginated(ctx context.Context, params ListResultsParams) (map[string]*proto.Result, int, error)
+	ListProjects(ctx context.Context) ([]string, error)
 	Close() error
 }

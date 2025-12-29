@@ -671,6 +671,205 @@ func TestR2StorageListResultsPaginated(t *testing.T) {
 	}
 }
 
+func TestR2Storage_ListResultsPaginated_ProjectFiltering(t *testing.T) {
+	skipIfNoR2(t)
+	t.Parallel()
+
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
+
+	// Create unique bucket for this test
+	cfg := &storage.R2Config{
+		Endpoint:        os.Getenv("R2_ENDPOINT"),
+		Bucket:          "test-filter-" + strconv.FormatInt(time.Now().Unix(), 10),
+		AccessKeyID:     "test",
+		SecretAccessKey: "test",
+		UsePathStyle:    true,
+	}
+
+	store, err := storage.NewR2Storage(ctx, cfg)
+	require.NoError(t, err)
+
+	// Save results for project-a
+	for i := 1; i <= 5; i++ {
+		result := &proto.Result{
+			SubmissionId: fmt.Sprintf("project-a-%d", i),
+			Project:      "project-a",
+			Timestamp:    time.Now().Format(time.RFC3339),
+			Rubric: []*proto.RubricItem{
+				{Name: "Test", Points: 10, Awarded: float64(i)},
+			},
+		}
+		err := store.SaveResult(ctx, result)
+		require.NoError(t, err)
+	}
+
+	// Save results for project-b
+	for i := 1; i <= 3; i++ {
+		result := &proto.Result{
+			SubmissionId: fmt.Sprintf("project-b-%d", i),
+			Project:      "project-b",
+			Timestamp:    time.Now().Format(time.RFC3339),
+			Rubric: []*proto.RubricItem{
+				{Name: "Test", Points: 10, Awarded: float64(i)},
+			},
+		}
+		err := store.SaveResult(ctx, result)
+		require.NoError(t, err)
+	}
+
+	tests := []struct {
+		name      string
+		project   string
+		wantCount int
+	}{
+		{
+			name:      "filter_by_project_a",
+			project:   "project-a",
+			wantCount: 5,
+		},
+		{
+			name:      "filter_by_project_b",
+			project:   "project-b",
+			wantCount: 3,
+		},
+		{
+			name:      "no_filter_returns_all",
+			project:   "",
+			wantCount: 8,
+		},
+		{
+			name:      "nonexistent_project",
+			project:   "nonexistent",
+			wantCount: 0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			params := storage.ListResultsParams{
+				Page:     1,
+				PageSize: 100,
+				Project:  tt.project,
+			}
+
+			results, totalCount, err := store.ListResultsPaginated(ctx, params)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCount, totalCount)
+			assert.Equal(t, tt.wantCount, len(results))
+
+			// Verify all results match the project filter if specified
+			if tt.project != "" {
+				for _, result := range results {
+					assert.Equal(t, tt.project, result.Project)
+				}
+			}
+		})
+	}
+}
+
+func TestR2Storage_ListProjects(t *testing.T) {
+	skipIfNoR2(t)
+	t.Parallel()
+
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
+
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, store *storage.R2Storage)
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "empty_storage",
+			setup: func(t *testing.T, store *storage.R2Storage) {
+				// No submissions saved
+			},
+			want:    []string{},
+			wantErr: false,
+		},
+		{
+			name: "single_project",
+			setup: func(t *testing.T, store *storage.R2Storage) {
+				result := &proto.Result{
+					SubmissionId: "test-001",
+					Project:      "test-project",
+					Timestamp:    time.Now().Format(time.RFC3339),
+					Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+				}
+				err := store.SaveResult(ctx, result)
+				require.NoError(t, err)
+			},
+			want:    []string{"test-project"},
+			wantErr: false,
+		},
+		{
+			name: "multiple_projects_sorted",
+			setup: func(t *testing.T, store *storage.R2Storage) {
+				projects := []string{"zebra-project", "alpha-project", "beta-project"}
+				for i, proj := range projects {
+					result := &proto.Result{
+						SubmissionId: fmt.Sprintf("test-%03d", i),
+						Project:      proj,
+						Timestamp:    time.Now().Format(time.RFC3339),
+						Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+					}
+					err := store.SaveResult(ctx, result)
+					require.NoError(t, err)
+				}
+			},
+			want:    []string{"alpha-project", "beta-project", "zebra-project"},
+			wantErr: false,
+		},
+		{
+			name: "duplicate_projects_deduplicated",
+			setup: func(t *testing.T, store *storage.R2Storage) {
+				for i := range 3 {
+					result := &proto.Result{
+						SubmissionId: fmt.Sprintf("test-%03d", i),
+						Project:      "duplicate-project",
+						Timestamp:    time.Now().Format(time.RFC3339),
+						Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+					}
+					err := store.SaveResult(ctx, result)
+					require.NoError(t, err)
+				}
+			},
+			want:    []string{"duplicate-project"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create unique bucket for each test case with short name
+			bucketName := fmt.Sprintf("test-proj-%d", time.Now().UnixNano()%1000000000)
+			cfg := &storage.R2Config{
+				Endpoint:        os.Getenv("R2_ENDPOINT"),
+				Bucket:          bucketName,
+				AccessKeyID:     "test",
+				SecretAccessKey: "test",
+				UsePathStyle:    true,
+			}
+
+			store, err := storage.NewR2Storage(ctx, cfg)
+			require.NoError(t, err)
+
+			if tt.setup != nil {
+				tt.setup(t, store)
+			}
+
+			projects, err := store.ListProjects(ctx)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, projects)
+			}
+		})
+	}
+}
+
 func TestR2Storage_Close(t *testing.T) {
 	skipIfNoR2(t)
 	t.Parallel()

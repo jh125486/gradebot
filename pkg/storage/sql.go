@@ -217,9 +217,21 @@ func (s *SQLStorage) ListResultsPaginated(
 	// Validate and normalize parameters
 	params = params.Validate()
 
+	// Build WHERE clause for project filter
+	var whereClause string
+	var args []any
+	argIndex := 1
+
+	if params.Project != "" {
+		whereClause = " WHERE project = $" + fmt.Sprintf("%d", argIndex)
+		args = append(args, params.Project)
+		argIndex++
+	}
+
 	// Get total count
-	const countQ = `SELECT COUNT(*) FROM submissions`
-	if err = s.db.QueryRowContext(ctx, countQ).Scan(&totalCount); err != nil {
+	countQ := "SELECT COUNT(*) FROM submissions" + whereClause
+	countArgs := args
+	if err = s.db.QueryRowContext(ctx, countQ, countArgs...).Scan(&totalCount); err != nil {
 		return nil, 0, fmt.Errorf("failed to count submissions: %w", err)
 	}
 
@@ -232,14 +244,16 @@ func (s *SQLStorage) ListResultsPaginated(
 	offset := (params.Page - 1) * params.PageSize
 
 	// Fetch paginated results, ordered by uploaded_at DESC (newest first)
-	const q = `
+	//nolint:gosec // whereClause and argIndex are not user input, safe SQL formatting
+	q := fmt.Sprintf(`
 		SELECT submission_id, result 
-		FROM submissions 
+		FROM submissions%s 
 		ORDER BY uploaded_at DESC 
-		LIMIT $1 OFFSET $2
-	`
+		LIMIT $%d OFFSET $%d
+	`, whereClause, argIndex, argIndex+1)
 
-	rows, err := s.db.QueryContext(ctx, q, params.PageSize, offset)
+	args = append(args, params.PageSize, offset)
+	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query submissions: %w", err)
 	}
@@ -278,12 +292,51 @@ func (s *SQLStorage) ListResultsPaginated(
 	contextlog.From(ctx).InfoContext(ctx, "Listed paginated rubric results",
 		slog.Int("page", params.Page),
 		slog.Int("page_size", params.PageSize),
+		slog.String("project", params.Project),
 		slog.Int("total_count", totalCount),
 		slog.Int("returned", len(results)),
 		slog.Duration("duration", time.Since(start)),
 	)
 
 	return results, totalCount, nil
+}
+
+// ListProjects returns a list of distinct project names from the database
+func (s *SQLStorage) ListProjects(ctx context.Context) ([]string, error) {
+	start := time.Now()
+
+	const q = `
+		SELECT DISTINCT project 
+		FROM submissions 
+		WHERE project IS NOT NULL AND project != '' 
+		ORDER BY project
+	`
+
+	rows, err := s.db.QueryContext(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query projects: %w", err)
+	}
+	defer rows.Close()
+
+	projects := make([]string, 0)
+	for rows.Next() {
+		var project string
+		if err := rows.Scan(&project); err != nil {
+			return nil, fmt.Errorf("failed to scan project: %w", err)
+		}
+		projects = append(projects, project)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating project rows: %w", err)
+	}
+
+	contextlog.From(ctx).InfoContext(ctx, "Listed projects",
+		slog.Int("count", len(projects)),
+		slog.Duration("duration", time.Since(start)),
+	)
+
+	return projects, nil
 }
 
 // Close closes the database connection

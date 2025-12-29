@@ -3,7 +3,6 @@ package server_test
 import (
 	"context"
 	"errors"
-	"maps"
 	"net/http"
 	"net/http/httptest"
 	"sync"
@@ -18,7 +17,8 @@ import (
 	pb "github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/server"
 	"github.com/jh125486/gradebot/pkg/storage"
-) // Test constants for reducing duplication.
+)
+
 const (
 	testToken               = "s3cr3t"
 	testTokenBearer         = "Bearer " + testToken
@@ -91,9 +91,35 @@ func (m *mockStorage) ListResultsPaginated(ctx context.Context, params storage.L
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	results = make(map[string]*pb.Result)
-	totalCount = len(m.results)
-	maps.Copy(results, m.results)
+
+	// Filter by project if specified
+	for id, result := range m.results {
+		if params.Project == "" || result.Project == params.Project {
+			results[id] = result
+		}
+	}
+
+	totalCount = len(results)
 	return results, totalCount, nil
+}
+
+func (m *mockStorage) ListProjects(ctx context.Context) ([]string, error) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	projectSet := make(map[string]bool)
+	for _, result := range m.results {
+		if result.Project != "" {
+			projectSet[result.Project] = true
+		}
+	}
+
+	projects := make([]string, 0, len(projectSet))
+	for project := range projectSet {
+		projects = append(projects, project)
+	}
+
+	return projects, nil
 }
 
 func (m *mockStorage) Close() error {

@@ -13,10 +13,6 @@ import (
 type (
 	// CLI defines the command-line interface structure for the gradebot server application.
 	CLI struct {
-		Server ServerCmd `cmd:"" help:"Start the grading server"`
-	}
-	// ServerCmd defines the command structure for running the server.
-	ServerCmd struct {
 		Port           string `default:"8080"              help:"Port to listen on"                   name:"port"`
 		DatabaseURL    string `env:"DATABASE_URL"          help:"PostgreSQL database URL"             name:"database-url"`
 		R2Endpoint     string `env:"R2_ENDPOINT"           help:"R2/S3 endpoint URL"                  name:"r2-endpoint"`
@@ -33,7 +29,7 @@ type (
 )
 
 // AfterApply is a Kong hook that initializes storage and OpenAI client.
-func (cmd *ServerCmd) AfterApply(ctx cli.Context) error {
+func (cmd *CLI) AfterApply(ctx cli.Context) error {
 	var err error
 
 	// Initialize storage
@@ -62,7 +58,7 @@ func (cmd *ServerCmd) AfterApply(ctx cli.Context) error {
 }
 
 // Run executes the server command.
-func (cmd *ServerCmd) Run(ctx cli.Context, buildID string) error {
+func (cmd *CLI) Run(ctx cli.Context, buildID string) error {
 	port := cmd.Port
 	if port == "" {
 		port = "8080"

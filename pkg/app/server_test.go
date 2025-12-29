@@ -33,7 +33,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 		args    args
 		wantErr bool
 		setup   func(t *testing.T)
-		verify  func(t *testing.T, cmd *app.ServerCmd)
+		verify  func(t *testing.T, cmd *app.CLI)
 	}{
 		{
 			name: "sql_storage_with_valid_connection",
@@ -41,7 +41,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 				databaseURL: os.Getenv("DATABASE_URL"),
 			},
 			wantErr: false,
-			verify: func(t *testing.T, cmd *app.ServerCmd) {
+			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.Nil(t, cmd.OpenAIClient)
 			},
@@ -53,7 +53,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 				openAIAPIKey: "sk-test-key-12345",
 			},
 			wantErr: false,
-			verify: func(t *testing.T, cmd *app.ServerCmd) {
+			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.NotNil(t, cmd.OpenAIClient)
 			},
@@ -119,7 +119,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 				openAIAPIKey: "",
 			},
 			wantErr: false,
-			verify: func(t *testing.T, cmd *app.ServerCmd) {
+			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.Nil(t, cmd.OpenAIClient)
 			},
@@ -133,7 +133,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 				tt.setup(t)
 			}
 
-			cmd := &app.ServerCmd{
+			cmd := &app.CLI{
 				DatabaseURL:    tt.args.databaseURL,
 				R2Endpoint:     tt.args.r2Endpoint,
 				R2Region:       tt.args.r2Region,
@@ -172,13 +172,13 @@ func TestServerCmd_Run(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		setup   func(t *testing.T) (*app.ServerCmd, context.Context, context.CancelFunc)
+		setup   func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc)
 		wantErr bool
 	}{
 		{
 			name: "nil_storage_returns_error",
-			setup: func(t *testing.T) (*app.ServerCmd, context.Context, context.CancelFunc) {
-				cmd := &app.ServerCmd{
+			setup: func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc) {
+				cmd := &app.CLI{
 					Port:    "0",
 					Storage: nil,
 				}
@@ -190,8 +190,8 @@ func TestServerCmd_Run(t *testing.T) {
 		},
 		{
 			name: "context_cancelled_returns_error",
-			setup: func(t *testing.T) (*app.ServerCmd, context.Context, context.CancelFunc) {
-				cmd := &app.ServerCmd{
+			setup: func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc) {
+				cmd := &app.CLI{
 					Port:    "0",
 					Storage: &mockStorage{},
 				}
@@ -236,6 +236,10 @@ func (m *mockStorage) LoadResult(_ context.Context, _ string) (*pb.Result, error
 
 func (m *mockStorage) ListResultsPaginated(_ context.Context, _ storage.ListResultsParams) (results map[string]*pb.Result, total int, err error) {
 	return make(map[string]*pb.Result), 0, nil
+}
+
+func (m *mockStorage) ListProjects(_ context.Context) ([]string, error) {
+	return []string{}, nil
 }
 
 func (m *mockStorage) Close() error {
