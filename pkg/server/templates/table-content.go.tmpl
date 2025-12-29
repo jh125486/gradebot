@@ -11,7 +11,7 @@
 <tbody>
 {{range .Submissions}}
 <tr>
-<td><a href="/submissions/{{.SubmissionID}}" class="submission-link"><code class="submission-id">{{.SubmissionID}}</code> 🔗</a></td>
+<td><a href="/{{$.Project}}/{{.SubmissionID}}" class="submission-link"><code class="submission-id">{{.SubmissionID}}</code> 🔗</a></td>
 <td>{{.Project}}</td>
 <td><small>{{.Timestamp.Format "2006-01-02 15:04"}}</small></td>
 <td>

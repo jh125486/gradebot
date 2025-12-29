@@ -315,6 +315,208 @@ func TestSQLStorage_ListResultsPaginated_EmptyDatabase(t *testing.T) {
 	assert.Empty(t, results)
 }
 
+func TestSQLStorage_ListResultsPaginated_ProjectFiltering(t *testing.T) {
+	skipIfNoSQL(t)
+
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
+	store := createTestSQLStorage(t)
+	defer store.Close()
+
+	// Setup: Clear and create test data with different projects
+	clearTestData(t, store)
+
+	// Create 10 submissions for project-a
+	for i := range 10 {
+		result := &proto.Result{
+			Project:      "project-a",
+			SubmissionId: fmt.Sprintf("project-a-%03d", i),
+			Timestamp:    time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+			Rubric: []*proto.RubricItem{
+				{Name: fmt.Sprintf("Item %d", i), Points: 10, Awarded: float64(i % 11)},
+			},
+		}
+		err := store.SaveResult(ctx, result)
+		require.NoError(t, err)
+	}
+
+	// Create 5 submissions for project-b
+	for i := range 5 {
+		result := &proto.Result{
+			Project:      "project-b",
+			SubmissionId: fmt.Sprintf("project-b-%03d", i),
+			Timestamp:    time.Now().Add(-time.Duration(i) * time.Hour).Format(time.RFC3339),
+			Rubric: []*proto.RubricItem{
+				{Name: fmt.Sprintf("Item %d", i), Points: 10, Awarded: float64(i % 11)},
+			},
+		}
+		err := store.SaveResult(ctx, result)
+		require.NoError(t, err)
+	}
+
+	type args struct {
+		params storage.ListResultsParams
+	}
+	tests := []struct {
+		name      string
+		args      args
+		wantCount int
+		wantTotal int
+		wantErr   bool
+	}{
+		{
+			name: "filter by project-a",
+			args: args{
+				params: storage.ListResultsParams{Page: 1, PageSize: 20, Project: "project-a"},
+			},
+			wantCount: 10,
+			wantTotal: 10,
+			wantErr:   false,
+		},
+		{
+			name: "filter by project-b",
+			args: args{
+				params: storage.ListResultsParams{Page: 1, PageSize: 20, Project: "project-b"},
+			},
+			wantCount: 5,
+			wantTotal: 5,
+			wantErr:   false,
+		},
+		{
+			name: "no filter returns all",
+			args: args{
+				params: storage.ListResultsParams{Page: 1, PageSize: 20, Project: ""},
+			},
+			wantCount: 15,
+			wantTotal: 15,
+			wantErr:   false,
+		},
+		{
+			name: "nonexistent project",
+			args: args{
+				params: storage.ListResultsParams{Page: 1, PageSize: 20, Project: "nonexistent"},
+			},
+			wantCount: 0,
+			wantTotal: 0,
+			wantErr:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			results, totalCount, err := store.ListResultsPaginated(ctx, tt.args.params)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.wantTotal, totalCount)
+				assert.Len(t, results, tt.wantCount)
+
+				// Verify all results match the project filter if specified
+				if tt.args.params.Project != "" {
+					for _, result := range results {
+						assert.Equal(t, tt.args.params.Project, result.Project)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestSQLStorage_ListProjects(t *testing.T) {
+	skipIfNoSQL(t)
+
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
+	store := createTestSQLStorage(t)
+	defer store.Close()
+
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T)
+		want    []string
+		wantErr bool
+	}{
+		{
+			name: "empty database",
+			setup: func(t *testing.T) {
+				clearTestData(t, store)
+			},
+			want:    []string{},
+			wantErr: false,
+		},
+		{
+			name: "single project",
+			setup: func(t *testing.T) {
+				clearTestData(t, store)
+				result := &proto.Result{
+					Project:      "test-project",
+					SubmissionId: "test-001",
+					Timestamp:    time.Now().Format(time.RFC3339),
+					Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+				}
+				err := store.SaveResult(ctx, result)
+				require.NoError(t, err)
+			},
+			want:    []string{"test-project"},
+			wantErr: false,
+		},
+		{
+			name: "multiple projects sorted",
+			setup: func(t *testing.T) {
+				clearTestData(t, store)
+				projects := []string{"zebra-project", "alpha-project", "beta-project"}
+				for i, proj := range projects {
+					result := &proto.Result{
+						Project:      proj,
+						SubmissionId: fmt.Sprintf("test-%03d", i),
+						Timestamp:    time.Now().Format(time.RFC3339),
+						Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+					}
+					err := store.SaveResult(ctx, result)
+					require.NoError(t, err)
+				}
+			},
+			want:    []string{"alpha-project", "beta-project", "zebra-project"},
+			wantErr: false,
+		},
+		{
+			name: "duplicate projects deduplicated",
+			setup: func(t *testing.T) {
+				clearTestData(t, store)
+				for i := range 3 {
+					result := &proto.Result{
+						Project:      "duplicate-project",
+						SubmissionId: fmt.Sprintf("test-%03d", i),
+						Timestamp:    time.Now().Format(time.RFC3339),
+						Rubric:       []*proto.RubricItem{{Name: "Item", Points: 10, Awarded: 5}},
+					}
+					err := store.SaveResult(ctx, result)
+					require.NoError(t, err)
+				}
+			},
+			want:    []string{"duplicate-project"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.setup != nil {
+				tt.setup(t)
+			}
+
+			projects, err := store.ListProjects(ctx)
+
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+				assert.Equal(t, tt.want, projects)
+			}
+		})
+	}
+}
+
 // Helper functions
 
 func createTestSQLStorage(t *testing.T) *storage.SQLStorage {

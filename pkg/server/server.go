@@ -28,6 +28,7 @@ import (
 const (
 	submissionsTmplFile  = "submissions.go.tmpl"
 	submissionTmplFile   = "submission.go.tmpl"
+	indexTmplFile        = "index.go.tmpl"
 	unknownIP            = "unknown"
 	unknownLocation      = "Unknown"
 	localUnknown         = "Local/Unknown"
@@ -122,6 +123,7 @@ type TemplateManager struct {
 	submissionsTmpl  *template.Template
 	submissionTmpl   *template.Template
 	tableContentTmpl *template.Template
+	indexTmpl        *template.Template
 }
 
 // NewTemplateManager creates and returns a new template manager with all embedded templates loaded.
@@ -142,6 +144,9 @@ func NewTemplateManager() *TemplateManager {
 		tableContentTmpl: template.Must(
 			template.New("table-content.go.tmpl").Funcs(funcMap).ParseFS(templatesFS,
 				filepath.Join("templates", "table-content.go.tmpl"))),
+		indexTmpl: template.Must(
+			template.New(indexTmplFile).Funcs(funcMap).ParseFS(templatesFS,
+				filepath.Join("templates", indexTmplFile))),
 	}
 }
 
@@ -169,6 +174,7 @@ type RubricItemData struct {
 // SubmissionsPageData contains all data needed to render the submissions overview page,
 // including pagination information, submission details, and score statistics.
 type SubmissionsPageData struct {
+	Project          string
 	TotalSubmissions int
 	HighScore        float64
 	Submissions      []SubmissionData
@@ -177,6 +183,11 @@ type SubmissionsPageData struct {
 	PageSize         int
 	HasPrevPage      bool
 	HasNextPage      bool
+}
+
+// IndexPageData contains the list of projects for the index page
+type IndexPageData struct {
+	Projects []string
 }
 
 type (
@@ -242,14 +253,16 @@ func Start(ctx context.Context, cfg Config) error {
 	mux.Handle(qualityPath, realIPMiddleware(AuthMiddleware(cfg.ID)(qualityHandler)))
 	mux.Handle(rubricPath, realIPMiddleware(AuthMiddleware(cfg.ID)(rubricHandler)))
 
-	// Serve embedded HTML page (no auth required)
-	mux.Handle("/submissions", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveSubmissionsPage(w, r, rubricServer)
-	}))
+	// Serve index page with list of all projects (no auth required)
+	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Only handle exact root path
+		if r.URL.Path == "/" {
+			serveIndexPage(w, r, rubricServer)
+			return
+		}
 
-	// Serve individual submission details (no auth required)
-	mux.Handle("/submissions/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		serveSubmissionDetailPage(w, r, rubricServer)
+		// Try to handle as project submissions page or submission detail
+		handleProjectRoutes(w, r, rubricServer)
 	}))
 
 	// Health check endpoint for Koyeb and monitoring
@@ -356,13 +369,69 @@ func getPaginationParams(r *http.Request) (page, pageSize int) {
 	return page, pageSize
 }
 
+// serveIndexPage serves the HTML page for viewing all projects/classes
+func serveIndexPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+	ctx := r.Context()
+	l := contextlog.From(ctx)
+
+	w.Header().Set(contentTypeHeader, htmlContentType)
+
+	// Fetch list of projects from storage
+	projects, err := rubricServer.storage.ListProjects(ctx)
+	if err != nil {
+		l.ErrorContext(ctx, "Failed to list projects from storage", slog.Any("error", err))
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	data := IndexPageData{
+		Projects: projects,
+	}
+
+	l.InfoContext(ctx, "Serving index page",
+		slog.Int("project_count", len(projects)))
+
+	// Execute template
+	if err := rubricServer.templates.indexTmpl.Execute(w, data); err != nil {
+		l.ErrorContext(ctx, templateExecErrMsg, slog.Any("error", err))
+		http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
+		return
+	}
+}
+
+// handleProjectRoutes handles /$project and /$project/$id routes
+func handleProjectRoutes(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+	// Parse path: /$project or /$project/$id
+	path := strings.TrimPrefix(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) == 0 || parts[0] == "" {
+		http.Error(w, "Invalid path", http.StatusNotFound)
+		return
+	}
+
+	project := parts[0]
+
+	switch len(parts) {
+	case 1:
+		// /$project - show submissions for this project
+		serveProjectSubmissionsPage(w, r, rubricServer, project)
+	case 2:
+		// /$project/$id - show submission detail
+		submissionID := parts[1]
+		serveSubmissionDetailPage(w, r, rubricServer, project, submissionID)
+	default:
+		http.Error(w, "Invalid path", http.StatusNotFound)
+	}
+}
+
 // executeTableContent renders just the table content for HTMX partial updates using a template
 func executeTableContent(w http.ResponseWriter, data *SubmissionsPageData, rubricServer *RubricServer) error {
 	return rubricServer.templates.tableContentTmpl.Execute(w, data)
 }
 
-// serveSubmissionsPage serves the HTML page for viewing submissions
-func serveSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+// serveProjectSubmissionsPage serves the HTML page for viewing submissions for a specific project
+func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project string) {
 	ctx := r.Context()
 
 	// Get pagination parameters
@@ -370,10 +439,11 @@ func serveSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *
 
 	w.Header().Set(contentTypeHeader, htmlContentType)
 
-	// Fetch paginated results from storage
+	// Fetch paginated results from storage, filtered by project
 	results, totalCount, err := rubricServer.storage.ListResultsPaginated(ctx, storage.ListResultsParams{
 		Page:     page,
 		PageSize: pageSize,
+		Project:  project,
 	})
 	if err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, "Failed to list paginated results from storage",
@@ -392,6 +462,7 @@ func serveSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *
 	}
 
 	data := SubmissionsPageData{
+		Project:          project,
 		TotalSubmissions: totalCount,
 		HighScore:        highScore,
 		Submissions:      submissions,
@@ -402,7 +473,8 @@ func serveSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *
 		HasNextPage:      page < totalPages,
 	}
 
-	contextlog.From(ctx).InfoContext(ctx, "Serving submissions page",
+	contextlog.From(ctx).InfoContext(ctx, "Serving project submissions page",
+		slog.String("project", project),
 		slog.Int("total_submissions", totalCount),
 		slog.Int("page", page),
 		slog.Int("total_pages", totalPages),
@@ -429,18 +501,9 @@ func serveSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *
 }
 
 // serveSubmissionDetailPage serves the HTML page for a specific submission's details
-func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project, submissionID string) {
 	// Set content type
 	w.Header().Set(contentTypeHeader, htmlContentType)
-
-	// Extract submission ID from URL path
-	path := strings.TrimPrefix(r.URL.Path, "/submissions/")
-	if path == "" || path == r.URL.Path {
-		http.Error(w, "Invalid submission ID", http.StatusBadRequest)
-		return
-	}
-
-	submissionID := path
 
 	ctx := r.Context()
 	result, err := rubricServer.storage.LoadResult(ctx, submissionID)
@@ -448,6 +511,16 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricSer
 		contextlog.From(ctx).ErrorContext(ctx, "Failed to load result from storage",
 			slog.Any("error", err),
 			slog.String("submission_id", submissionID))
+		http.Error(w, "Submission not found", http.StatusNotFound)
+		return
+	}
+
+	// Verify that the submission belongs to the requested project
+	if result.Project != project {
+		contextlog.From(ctx).WarnContext(ctx, "Submission project mismatch",
+			slog.String("submission_id", submissionID),
+			slog.String("requested_project", project),
+			slog.String("actual_project", result.Project))
 		http.Error(w, "Submission not found", http.StatusNotFound)
 		return
 	}

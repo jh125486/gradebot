@@ -7,6 +7,7 @@ import (
 	"io"
 	"log/slog"
 	"runtime"
+	"sort"
 	"sync"
 	"time"
 
@@ -35,6 +36,10 @@ type R2Config struct {
 	// Addressing style
 	UsePathStyle bool
 }
+
+const (
+	submissionKeyFormat = "submissions/%s.json"
+)
 
 // R2Storage implements Storage using Cloudflare R2 (S3-compatible)
 type R2Storage struct {
@@ -125,7 +130,7 @@ func (r *R2Storage) SaveResult(ctx context.Context, result *proto.Result) error 
 		return fmt.Errorf("failed to marshal result: %w", err)
 	}
 
-	key := fmt.Sprintf("submissions/%s.json", result.SubmissionId)
+	key := fmt.Sprintf(submissionKeyFormat, result.SubmissionId)
 
 	_, err = r.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      &r.bucket,
@@ -149,7 +154,7 @@ func (r *R2Storage) SaveResult(ctx context.Context, result *proto.Result) error 
 // LoadResult loads a rubric result from storage
 func (r *R2Storage) LoadResult(ctx context.Context, submissionID string) (*proto.Result, error) {
 	start := time.Now()
-	key := fmt.Sprintf("submissions/%s.json", submissionID)
+	key := fmt.Sprintf(submissionKeyFormat, submissionID)
 
 	resp, err := r.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: &r.bucket,
@@ -230,18 +235,33 @@ func (r *R2Storage) ListResultsPaginated(ctx context.Context, params ListResults
 		return nil, 0, err
 	}
 
-	totalCount = len(allKeys)
+	// Load all results to filter by project if needed
+	var filteredKeys []string
+	if params.Project != "" {
+		// Need to load results to filter by project
+		allResults := r.loadResultsParallel(ctx, allKeys)
+		for key, result := range allResults {
+			if result.Project == params.Project {
+				filteredKeys = append(filteredKeys, fmt.Sprintf(submissionKeyFormat, key))
+			}
+		}
+	} else {
+		filteredKeys = allKeys
+	}
+
+	totalCount = len(filteredKeys)
 
 	// Calculate pagination boundaries
 	startIdx, endIdx := params.CalculatePaginationBounds(totalCount)
 
 	// Fetch results for this page in parallel
-	pageKeys := allKeys[startIdx:endIdx]
+	pageKeys := filteredKeys[startIdx:endIdx]
 	results = r.loadResultsParallel(ctx, pageKeys)
 
 	contextlog.From(ctx).InfoContext(ctx, "Listed paginated rubric results",
 		slog.Int("page", params.Page),
 		slog.Int("page_size", params.PageSize),
+		slog.String("project", params.Project),
 		slog.Int("total_count", totalCount),
 		slog.Int("returned", len(results)),
 		slog.String("bucket", r.bucket),
@@ -313,6 +333,42 @@ func (r *R2Storage) ensureBucketExists(ctx context.Context) error {
 
 	contextlog.From(ctx).InfoContext(ctx, "Bucket already exists", slog.String("bucket", r.bucket))
 	return nil
+}
+
+// ListProjects returns a list of distinct project names from storage
+func (r *R2Storage) ListProjects(ctx context.Context) ([]string, error) {
+	start := time.Now()
+
+	// Collect all keys from storage
+	allKeys, err := r.collectAllKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Load all results to extract unique projects
+	allResults := r.loadResultsParallel(ctx, allKeys)
+
+	projectSet := make(map[string]bool)
+	for _, result := range allResults {
+		if result.Project != "" {
+			projectSet[result.Project] = true
+		}
+	}
+
+	// Convert set to sorted slice
+	projects := make([]string, 0, len(projectSet))
+	for project := range projectSet {
+		projects = append(projects, project)
+	}
+	sort.Strings(projects)
+
+	contextlog.From(ctx).InfoContext(ctx, "Listed projects",
+		slog.Int("count", len(projects)),
+		slog.String("bucket", r.bucket),
+		slog.Duration("duration", time.Since(start)),
+	)
+
+	return projects, nil
 }
 
 // Close closes the storage connection (no-op for R2/S3)
