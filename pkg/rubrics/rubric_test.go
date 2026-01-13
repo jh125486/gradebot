@@ -24,13 +24,12 @@ func TestResult_Awarded(t *testing.T) {
 		{name: "multiple", items: []r.RubricItem{{Name: "A", Note: "ok", Awarded: 3}, {Name: "B", Note: "also", Awarded: 7}}, wantTotal: 10},
 	}
 
-	for i := range tests {
-		tc := tests[i]
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			res := &r.Result{Rubric: tc.items}
-			if got := res.Awarded(); got != tc.wantTotal {
-				t.Fatalf("Awarded() = %f, want %f", got, tc.wantTotal)
+			res := &r.Result{Rubric: tt.items}
+			if got := res.Awarded(); got != tt.wantTotal {
+				t.Fatalf("Awarded() = %f, want %f", got, tt.wantTotal)
 			}
 		})
 	}
@@ -51,29 +50,28 @@ func TestResult_ToTable(t *testing.T) {
 		{name: "nil_writer_uses_stdout", submissionID: "s4", items: []r.RubricItem{{Name: "C", Note: "test", Points: 10}}, useNilWriter: true},
 	}
 
-	for i := range tests {
-		tc := tests[i]
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			res := &r.Result{SubmissionID: tc.submissionID, Rubric: tc.items}
+			res := &r.Result{SubmissionID: tt.submissionID, Rubric: tt.items}
 
 			var buf bytes.Buffer
 			var out string
-			if tc.useNilWriter {
+			if tt.useNilWriter {
 				res.Render(nil) // Should use os.Stdout
 			} else {
 				res.Render(&buf)
 				out = buf.String()
 			}
 
-			if !tc.useNilWriter {
-				for _, it := range tc.items {
+			if !tt.useNilWriter {
+				for _, it := range tt.items {
 					if !strings.Contains(out, it.Name) {
 						t.Fatalf("output missing item name %q: %s", it.Name, out)
 					}
 				}
-				if !strings.Contains(out, tc.submissionID) {
-					t.Fatalf("output missing SubmissionID %q: %s", tc.submissionID, out)
+				if !strings.Contains(out, tt.submissionID) {
+					t.Fatalf("output missing SubmissionID %q: %s", tt.submissionID, out)
 				}
 			}
 			// nil writer case - just verify it doesn't panic (output goes to stdout)
@@ -145,6 +143,7 @@ func TestBagValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			got := r.BagValue[string](tt.args.bag, tt.args.key)
 			assert.Equal(t, tt.want, got)
 		})
@@ -197,6 +196,7 @@ func TestSetBagValue(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 			r.SetBagValue(tt.args.bag, tt.args.key, tt.args.pVal)
 			if tt.verify != nil {
 				tt.verify(t, tt.args.bag)
