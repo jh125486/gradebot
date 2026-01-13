@@ -3,6 +3,7 @@ package rubrics
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 )
 
@@ -13,8 +14,8 @@ type Commander interface {
 	SetStdin(stdin io.Reader)
 	SetStdout(stdout io.Writer)
 	SetStderr(stderr io.Writer)
-	// Start begins execution without waiting for completion. Run may block
-	// until the process exits.
+	// Start begins execution without waiting for completion.
+	// Run may block until the process exits.
 	Start() error
 	Run() error
 	ProcessKill() error
@@ -69,11 +70,23 @@ func (c *execCmd) Run() error {
 // ExecCommandFactory is the production implementation of CommandFactory.
 type ExecCommandFactory struct {
 	context.Context
+	Env map[string]string
 }
 
 // New creates a new execCmd wrapper.
 func (f *ExecCommandFactory) New(name string, arg ...string) Commander {
-	return &execCmd{Cmd: exec.CommandContext(f.Context, name, arg...)}
+	cmd := exec.CommandContext(f.Context, name, arg...)
+
+	// Set environment variables if provided
+	if len(f.Env) > 0 {
+		env := os.Environ()
+		for key, value := range f.Env {
+			env = append(env, key+"="+value)
+		}
+		cmd.Env = env
+	}
+
+	return &execCmd{Cmd: cmd}
 }
 
 // ProgramRunner is the interface used by rubrics to run student programs.
@@ -83,7 +96,7 @@ func (f *ExecCommandFactory) New(name string, arg ...string) Commander {
 type ProgramRunner interface {
 	Path() string
 	Run(args ...string) error
-	Do(in string) ([]string, []string, error)
+	Do(in string) (stdout, stderr []string, err error)
 	Kill() error
 	Cleanup(ctx context.Context) error
 }

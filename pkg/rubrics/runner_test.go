@@ -23,8 +23,11 @@ func TestExecCommandFactory_New(t *testing.T) {
 		arg  []string
 	}
 	tests := []struct {
-		name string
-		args args
+		name           string
+		args           args
+		env            map[string]string
+		expectContains string
+		skip           func() bool
 	}{
 		{
 			name: "creates_commander_with_single_arg",
@@ -58,14 +61,43 @@ func TestExecCommandFactory_New(t *testing.T) {
 				arg:  []string{"test"},
 			},
 		},
+		{
+			name: "sets_env_on_command",
+			args: args{
+				ctx:  context.Background(),
+				name: "env",
+				arg:  []string{},
+			},
+			env: map[string]string{
+				"GRADEBOT_ENV_TEST": "42",
+			},
+			expectContains: "GRADEBOT_ENV_TEST=42",
+			skip:           func() bool { return runtime.GOOS == "windows" },
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: tt.args.ctx}
+			if tt.skip != nil && tt.skip() {
+				t.Skip("platform-specific")
+			}
+
+			factory := &rubrics.ExecCommandFactory{Context: tt.args.ctx, Env: tt.env}
 			cmd := factory.New(tt.args.name, tt.args.arg...)
+
+			if tt.expectContains != "" {
+				var stdout bytes.Buffer
+				cmd.SetStdout(&stdout)
+
+				err := cmd.Run()
+				require.NoError(t, err)
+
+				assert.Contains(t, stdout.String(), tt.expectContains)
+				return
+			}
+
 			require.NotNil(t, cmd)
 		})
 	}

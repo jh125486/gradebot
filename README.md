@@ -27,6 +27,11 @@ import (
 cfg := &client.Config{
     Dir:    client.WorkDir("/path/to/student/code"),
     RunCmd: "go run .",
+    // ProgramBuilder is optional - defaults to creating a Program with ExecCommandFactory
+    // For testing, provide a custom builder:
+    // ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+    //     return myTestProgram, nil
+    // },
 }
 
 // Execute with custom evaluators
