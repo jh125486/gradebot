@@ -52,7 +52,7 @@ Gradebot provides a `cli` package to help structure command-line tools using [Ko
 svc := cli.NewService(buildID)
 
 // 2. Bind the service when parsing Kong arguments
-// Note: cli.CommonArgs can be embedded in commands to get standard scheduling flags
+// Note: cli.CommonArgs can be embedded in commands to get standard project grading flags
 ctx := kong.Parse(&CLI,
     kong.Bind(svc),
 )
