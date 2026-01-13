@@ -33,7 +33,7 @@ jobs:
           git-url: github.com/jh125486/gradebot
           git-branch: main
           git-builder: buildpack
-          git-run-command: ./bin/gradebot server
+          git-run-command: ./bin/gradebot
           service-regions: was
           service-instance-type: free
           service-env: OPENAI_API_KEY=@OPENAI_API_KEY,BUILD_ID=@BUILD_ID,DATABASE_URL=@DATABASE_URL,R2_ENDPOINT=@R2_ENDPOINT,AWS_ACCESS_KEY_ID=@AWS_ACCESS_KEY_ID,AWS_SECRET_ACCESS_KEY=@AWS_SECRET_ACCESS_KEY
