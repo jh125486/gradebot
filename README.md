@@ -43,6 +43,31 @@ err := client.ExecuteProject(ctx, cfg, "Assignment1", "Assignment instructions",
 )
 ```
 
+## Building a CLI
+
+Gradebot provides a `cli` package to help structure command-line tools using [Kong](https://github.com/alecthomas/kong).
+
+```go
+// 1. Create a service container for dependencies
+svc := cli.NewService(buildID)
+
+// 2. Bind the service when parsing Kong arguments
+// Note: cli.CommonArgs can be embedded in commands to get standard scheduling flags
+ctx := kong.Parse(&CLI,
+    kong.Bind(svc),
+)
+
+// 3. Define commands that accept the service as an argument
+type MyCommand struct {
+    Args cli.CommonArgs `embed:""`
+}
+
+func (c *MyCommand) Run(svc *cli.Service) error {
+    // Access configured shared dependencies (Client, Stdin/Stdout, etc.)
+    return nil
+}
+```
+
 ## Course-Specific Implementations
 
 Course-specific implementations should:

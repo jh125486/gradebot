@@ -1,11 +1,15 @@
 package rubrics_test
 
 import (
+	"context"
 	"errors"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -13,6 +17,8 @@ import (
 
 	"github.com/jh125486/gradebot/pkg/rubrics"
 )
+
+const osWindows = "windows"
 
 // TestSafeBufferBasicOperations tests basic SafeBuffer operations
 func TestSafeBufferBasicOperations(t *testing.T) {
@@ -616,6 +622,28 @@ func TestProgram_Do(t *testing.T) {
 			wantStderr: nil,
 			runFirst:   false,
 		},
+		{
+			name:  "NoInputWriter",
+			input: "input",
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
+				mockCmd := NewMockCommander()
+				mockBuilder := new(MockCommandBuilder)
+				// Expect args passed by TestProgram_Do harness ("run", ".")
+				mockBuilder.On("New", "echo", []string{"run", "."}).Return(mockCmd)
+				mockCmd.On("SetDir", mock.Anything).Return()
+				mockCmd.On("SetStdin", mock.Anything).Return()
+				mockCmd.On("SetStdout", mock.Anything).Return()
+				mockCmd.On("SetStderr", mock.Anything).Return()
+				mockCmd.On("Start").Return(nil)
+
+				prog := rubrics.NewProgram(".", "echo hello", mockBuilder, rubrics.WithReaderWriter(nil, nil))
+				return prog, mockBuilder, mockCmd
+			},
+			wantErr:    false,
+			wantStdout: nil,
+			wantStderr: nil,
+			runFirst:   true,
+		},
 	}
 
 	for _, tc := range tests {
@@ -768,4 +796,66 @@ func TestProgram_Cleanup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProgramRunPhysicalChdir(t *testing.T) {
+	// Not running parallel as it modifies global state (cwd)
+
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+
+	// Create a dummy builder that just verifies we are in the tempDir
+	mockBuilder := &MockCommandBuilder{}
+	mockCmd := NewMockCommander()
+	mockBuilder.On("New", "echo", []string{"hello"}).Return(mockCmd)
+	mockCmd.On("SetDir", tempDir).Return()
+	mockCmd.On("SetStdin", mock.Anything).Return()
+	mockCmd.On("SetStdout", mock.Anything).Return()
+	mockCmd.On("SetStderr", mock.Anything).Return()
+	mockCmd.On("Start").Return(nil)
+
+	prog := rubrics.NewProgram(tempDir, "echo hello", mockBuilder)
+	err = prog.Run()
+	require.NoError(t, err)
+
+	// Verify we are back in the original directory
+	afterDir, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, currentDir, afterDir)
+
+	mockBuilder.AssertExpectations(t)
+	mockCmd.AssertExpectations(t)
+}
+
+func TestProgramDoIntegration(t *testing.T) {
+	if runtime.GOOS == osWindows {
+		t.Skip("skipping on windows")
+	}
+
+	ctx := context.Background()
+
+	// Use 'cat' which echoes stdin to stdout
+	runCmd := "cat"
+
+	builder := &rubrics.ExecCommandBuilder{Context: ctx}
+
+	prog := rubrics.NewProgram(t.TempDir(), runCmd, builder)
+
+	err := prog.Run()
+	require.NoError(t, err)
+	defer prog.Kill()
+
+	// Allow process to start up
+	time.Sleep(100 * time.Millisecond)
+
+	stdout, _, err := prog.Do("hello")
+	require.NoError(t, err)
+
+	assert.Contains(t, stdout, "hello")
+
+	stdout, _, err = prog.Do("world")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "world")
 }

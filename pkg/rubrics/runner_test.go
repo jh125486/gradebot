@@ -72,7 +72,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 				"GRADEBOT_ENV_TEST": "42",
 			},
 			expectContains: "GRADEBOT_ENV_TEST=42",
-			skip:           func() bool { return runtime.GOOS == "windows" },
+			skip:           func() bool { return runtime.GOOS == osWindows },
 		},
 	}
 
@@ -400,7 +400,7 @@ func TestExecCommandBuilder_Integration(t *testing.T) {
 
 	builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
 	var cmd rubrics.Commander
-	if runtime.GOOS == "windows" {
+	if runtime.GOOS == osWindows {
 		cmd = builder.New("cmd", "/C", "echo", "hello")
 	} else {
 		cmd = builder.New("echo", "hello")

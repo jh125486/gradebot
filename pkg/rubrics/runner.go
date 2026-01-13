@@ -9,17 +9,23 @@ import (
 
 // Commander defines an interface that wraps an external command.
 // This is a subset of exec.Cmd to allow for mocking.
-type Commander interface {
-	SetDir(dir string)
-	SetStdin(stdin io.Reader)
-	SetStdout(stdout io.Writer)
-	SetStderr(stderr io.Writer)
-	// Start begins execution without waiting for completion.
-	// Run may block until the process exits.
-	Start() error
-	Run() error
-	ProcessKill() error
-}
+type (
+	Commander interface {
+		SetDir(dir string)
+		StreamSetter
+
+		// Start begins execution without waiting for completion.
+		// Run may block until the process exits.
+		Start() error
+		Run() error
+		ProcessKill() error
+	}
+	StreamSetter interface {
+		SetStdin(stdin io.Reader)
+		SetStdout(stdout io.Writer)
+		SetStderr(stderr io.Writer)
+	}
+)
 
 // CommandBuilder defines an interface for creating new commands.
 type CommandBuilder interface {
