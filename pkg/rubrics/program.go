@@ -41,47 +41,52 @@ func (sb *SafeBuffer) String() string {
 	return sb.buf.String()
 }
 
-// Program implements the ProgramRunner interface using a CommandFactory
+// Program implements the ProgramRunner interface using a CommandBuilder
 // to allow for testable command execution.
 type Program struct {
 	WorkDir    string
 	RunCmd     []string
-	cmdFactory CommandFactory
+	cmdBuilder CommandBuilder
 
 	cmd    Commander
-	in     bytes.Buffer
 	out    SafeBuffer
 	errOut SafeBuffer
-	stdinW io.WriteCloser
 
-	// For testing: allow injection of stdin writer
-	stdinWriterFactory func() (io.Reader, io.WriteCloser)
+	inputWriter io.WriteCloser
+	inputReader io.Reader
 }
 
 // NewProgram creates a new Program instance.
-func NewProgram(workDir, runCmd string, factory CommandFactory) *Program {
+func NewProgram(workDir, runCmd string, builder CommandBuilder, opts ...func(*Program)) *Program {
 	// Convert relative paths to absolute paths to avoid issues with os.Chdir
 	if absDir, err := filepath.Abs(workDir); err == nil {
 		workDir = absDir
 	}
 
-	return &Program{
-		WorkDir:    workDir,
-		RunCmd:     strings.Fields(runCmd),
-		cmdFactory: factory,
-		// Default stdin writer factory uses io.Pipe
-		stdinWriterFactory: func() (io.Reader, io.WriteCloser) {
-			return io.Pipe()
-		},
+	pr, pw := io.Pipe()
+
+	p := &Program{
+		WorkDir:     workDir,
+		RunCmd:      strings.Fields(runCmd),
+		cmdBuilder:  builder,
+		inputReader: pr,
+		inputWriter: pw,
+	}
+
+	for _, opt := range opts {
+		opt(p)
+	}
+
+	return p
+}
+
+// WithReaderWriter configures the Program to use the provided reader and writer.
+func WithReaderWriter(reader io.Reader, writer io.WriteCloser) func(*Program) {
+	return func(p *Program) {
+		p.inputReader = reader
+		p.inputWriter = writer
 	}
 }
-
-// SetStdinWriterFactory allows injection of a custom stdin writer factory for testing
-func (p *Program) SetStdinWriterFactory(factory func() (io.Reader, io.WriteCloser)) {
-	p.stdinWriterFactory = factory
-}
-
-// Update ProgramRunner interface to match new Do signature in types.go
 
 // Path returns the working directory path
 func (p *Program) Path() string { return p.WorkDir }
@@ -137,16 +142,14 @@ func (p *Program) resolveCommand(args []string) (cmdName string, cmdArgs []strin
 }
 
 func (p *Program) startCommand(cmdName string, cmdArgs []string) error {
-	if p.cmdFactory == nil {
+	if p.cmdBuilder == nil {
 		return nil
 	}
 
-	p.cmd = p.cmdFactory.New(cmdName, cmdArgs...)
+	p.cmd = p.cmdBuilder.New(cmdName, cmdArgs...)
 	p.cmd.SetDir(p.WorkDir)
 
-	stdinR, stdinW := p.stdinWriterFactory()
-	p.stdinW = stdinW
-	p.cmd.SetStdin(stdinR)
+	p.cmd.SetStdin(p.inputReader)
 	p.cmd.SetStdout(&p.out)
 	p.cmd.SetStderr(&p.errOut)
 
@@ -155,7 +158,9 @@ func (p *Program) startCommand(cmdName string, cmdArgs []string) error {
 
 // Do sends input to the running program and returns captured output
 func (p *Program) Do(in string) (stdout, stderr []string, err error) {
-	p.captureInput(in)
+	if p.cmd == nil {
+		return nil, nil, nil
+	}
 
 	if err := p.sendToStdin(in); err != nil {
 		return nil, nil, err
@@ -170,21 +175,16 @@ func (p *Program) Do(in string) (stdout, stderr []string, err error) {
 	return splitLines(outStr), splitLines(errStr), nil
 }
 
-func (p *Program) captureInput(in string) {
-	p.in.Reset()
-	p.in.WriteString(in)
-}
-
 func (p *Program) sendToStdin(in string) error {
-	if p.stdinW == nil {
+	if p.inputWriter == nil {
 		return nil
 	}
-	_, err := p.stdinW.Write([]byte(in + "\n"))
+	_, err := p.inputWriter.Write([]byte(in + "\n"))
 	return err
 }
 
 func (p *Program) waitForOutput(prevOutLen, prevErrLen int) {
-	if p.stdinW == nil {
+	if p.inputWriter == nil || p.cmd == nil {
 		return
 	}
 

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -537,6 +538,42 @@ func TestExecuteProject(t *testing.T) {
 				}
 			},
 		},
+		{
+			name: "program_builder_error",
+			setupConfig: func() *client.Config {
+				dir := t.TempDir()
+				return &client.Config{
+					Dir:    client.WorkDir(dir),
+					RunCmd: "echo test",
+					Writer: io.Discard,
+					Reader: strings.NewReader("n\n"),
+					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+						return nil, fmt.Errorf("builder failed")
+					},
+				}
+			},
+			projectName: "BuilderErrorProject",
+			evaluators:  []rubrics.Evaluator{},
+			wantErr:     true,
+		},
+		{
+			name: "program_run_error",
+			setupConfig: func() *client.Config {
+				dir := t.TempDir()
+				return &client.Config{
+					Dir:    client.WorkDir(dir),
+					RunCmd: "echo test",
+					Writer: io.Discard,
+					Reader: strings.NewReader("n\n"),
+					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+						return &stubProgramWithRunError{}, nil
+					},
+				}
+			},
+			projectName: "RunErrorProject",
+			evaluators:  []rubrics.Evaluator{},
+			wantErr:     true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -627,6 +664,27 @@ func (s *stubProgram) Kill() error { return nil }
 
 func (s *stubProgram) Cleanup(context.Context) error {
 	s.cleanupCalled = true
+	return nil
+}
+
+// stubProgramWithRunError is a stub program that fails when Run is called.
+type stubProgramWithRunError struct{}
+
+func (s *stubProgramWithRunError) Path() string {
+	return "/stub"
+}
+
+func (s *stubProgramWithRunError) Run(_ ...string) error {
+	return errors.New("program run failed")
+}
+
+func (s *stubProgramWithRunError) Do(string) (stdout, stderr []string, err error) {
+	return nil, nil, nil
+}
+
+func (s *stubProgramWithRunError) Kill() error { return nil }
+
+func (s *stubProgramWithRunError) Cleanup(context.Context) error {
 	return nil
 }
 

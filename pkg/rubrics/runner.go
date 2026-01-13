@@ -21,8 +21,8 @@ type Commander interface {
 	ProcessKill() error
 }
 
-// CommandFactory defines an interface for creating new commands.
-type CommandFactory interface {
+// CommandBuilder defines an interface for creating new commands.
+type CommandBuilder interface {
 	New(name string, arg ...string) Commander
 }
 
@@ -67,20 +67,21 @@ func (c *execCmd) Run() error {
 	return c.Cmd.Run()
 }
 
-// ExecCommandFactory is the production implementation of CommandFactory.
-type ExecCommandFactory struct {
+// ExecCommandBuilder is the production implementation of CommandBuilder.
+// It is used internally by Program to create executable commands.
+type ExecCommandBuilder struct {
 	context.Context
 	Env map[string]string
 }
 
 // New creates a new execCmd wrapper.
-func (f *ExecCommandFactory) New(name string, arg ...string) Commander {
-	cmd := exec.CommandContext(f.Context, name, arg...)
+func (b *ExecCommandBuilder) New(name string, arg ...string) Commander {
+	cmd := exec.CommandContext(b.Context, name, arg...)
 
 	// Set environment variables if provided
-	if len(f.Env) > 0 {
+	if len(b.Env) > 0 {
 		env := os.Environ()
-		for key, value := range f.Env {
+		for key, value := range b.Env {
 			env = append(env, key+"="+value)
 		}
 		cmd.Env = env
@@ -89,8 +90,6 @@ func (f *ExecCommandFactory) New(name string, arg ...string) Commander {
 	return &execCmd{Cmd: cmd}
 }
 
-// ProgramRunner is the interface used by rubrics to run student programs.
-// It is declared here so runner-related abstractions live together.
 // ProgramRunner is the interface used by rubrics to run student programs.
 // It is declared here so runner-related abstractions live together.
 type ProgramRunner interface {

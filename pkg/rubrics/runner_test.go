@@ -14,7 +14,7 @@ import (
 	"github.com/jh125486/gradebot/pkg/rubrics"
 )
 
-func TestExecCommandFactory_New(t *testing.T) {
+func TestExecCommandBuilder_New(t *testing.T) {
 	t.Parallel()
 
 	type args struct {
@@ -84,8 +84,8 @@ func TestExecCommandFactory_New(t *testing.T) {
 				t.Skip("platform-specific")
 			}
 
-			factory := &rubrics.ExecCommandFactory{Context: tt.args.ctx, Env: tt.env}
-			cmd := factory.New(tt.args.name, tt.args.arg...)
+			builder := &rubrics.ExecCommandBuilder{Context: tt.args.ctx, Env: tt.env}
+			cmd := builder.New(tt.args.name, tt.args.arg...)
 
 			if tt.expectContains != "" {
 				var stdout bytes.Buffer
@@ -131,8 +131,8 @@ func TestExecCmd_SetDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New("echo", "test")
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New("echo", "test")
 			cmd.SetDir(tt.args.dir)
 			// Just verify it doesn't panic - actual dir check would require reflection
 		})
@@ -164,8 +164,8 @@ func TestExecCmd_SetStdin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New("cat")
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New("cat")
 			cmd.SetStdin(strings.NewReader(tt.input))
 			// Just verify it doesn't panic
 		})
@@ -190,8 +190,8 @@ func TestExecCmd_SetStdout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New("echo", "test")
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New("echo", "test")
 
 			var stdout bytes.Buffer
 			cmd.SetStdout(&stdout)
@@ -218,8 +218,8 @@ func TestExecCmd_SetStderr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New("echo", "test")
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New("echo", "test")
 
 			var stderr bytes.Buffer
 			cmd.SetStderr(&stderr)
@@ -239,16 +239,16 @@ func TestExecCmd_ProcessKill(t *testing.T) {
 		{
 			name: "kills_nil_process_without_error",
 			setup: func(t *testing.T) rubrics.Commander {
-				factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-				return factory.New("echo", "hello")
+				builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+				return builder.New("echo", "hello")
 			},
 			wantErr: false,
 		},
 		{
 			name: "kills_started_process",
 			setup: func(t *testing.T) rubrics.Commander {
-				factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-				cmd := factory.New("sleep", "60")
+				builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+				cmd := builder.New("sleep", "60")
 				err := cmd.Start()
 				require.NoError(t, err)
 				return cmd
@@ -315,8 +315,8 @@ func TestExecCmd_Start(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New(tt.args.name, tt.args.arg...)
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New(tt.args.name, tt.args.arg...)
 
 			err := cmd.Start()
 
@@ -381,8 +381,8 @@ func TestExecCmd_Run(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: context.Background()}
-			cmd := factory.New(tt.args.name, tt.args.arg...)
+			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			cmd := builder.New(tt.args.name, tt.args.arg...)
 
 			err := cmd.Run()
 
@@ -395,15 +395,15 @@ func TestExecCmd_Run(t *testing.T) {
 	}
 }
 
-func TestExecCommandFactory_Integration(t *testing.T) {
+func TestExecCommandBuilder_Integration(t *testing.T) {
 	t.Parallel()
 
-	factory := &rubrics.ExecCommandFactory{Context: context.Background()}
+	builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
 	var cmd rubrics.Commander
 	if runtime.GOOS == "windows" {
-		cmd = factory.New("cmd", "/C", "echo", "hello")
+		cmd = builder.New("cmd", "/C", "echo", "hello")
 	} else {
-		cmd = factory.New("echo", "hello")
+		cmd = builder.New("echo", "hello")
 	}
 
 	var stdout, stderr bytes.Buffer

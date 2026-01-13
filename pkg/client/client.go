@@ -106,7 +106,7 @@ type Config struct {
 	Reader io.Reader
 
 	// ProgramBuilder creates a ProgramRunner for a given working directory and run command.
-	// If nil, defaults to creating a Program with ExecCommandFactory using Env.
+	// If nil, defaults to creating a Program with ExecCommandBuilder using Env.
 	// This is the primary extension point for testing and customization.
 	ProgramBuilder func(workDir, runCmd string) (rubrics.ProgramRunner, error)
 }
@@ -239,12 +239,12 @@ func PromptForSubmission(ctx context.Context, w io.Writer, r io.Reader) bool {
 // The name parameter identifies the project/assignment being graded.
 // The instructions parameter is used for AI quality evaluation when QualityClient is configured.
 // If bag is nil, a new empty bag is created. Otherwise, the provided bag is used (for pre-configured context).
-// If ProgramBuilder is nil, defaults to creating a Program with ExecCommandFactory using Env.
+// If ProgramBuilder is nil, defaults to creating a Program with ExecCommandBuilder using Env.
 // This function is generic and can be used by any course-specific implementation.
 func ExecuteProject(ctx context.Context, cfg *Config, name, instructions string, bag rubrics.RunBag, items ...rubrics.Evaluator) error {
 	if cfg.ProgramBuilder == nil {
 		cfg.ProgramBuilder = func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
-			return rubrics.NewProgram(workDir, runCmd, &rubrics.ExecCommandFactory{Context: ctx, Env: cfg.Env}), nil
+			return rubrics.NewProgram(workDir, runCmd, &rubrics.ExecCommandBuilder{Context: ctx, Env: cfg.Env}), nil
 		}
 	}
 

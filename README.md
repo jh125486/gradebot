@@ -19,6 +19,7 @@ This library is designed to be imported by course-specific grading implementatio
 
 ```go
 import (
+    "github.com/go-git/go-billy/v5/osfs"
     "github.com/jh125486/gradebot/pkg/client"
     "github.com/jh125486/gradebot/pkg/rubrics"
 )
@@ -27,7 +28,7 @@ import (
 cfg := &client.Config{
     Dir:    client.WorkDir("/path/to/student/code"),
     RunCmd: "go run .",
-    // ProgramBuilder is optional - defaults to creating a Program with ExecCommandFactory
+    // ProgramBuilder is optional - defaults to creating a Program with ExecCommandBuilder
     // For testing, provide a custom builder:
     // ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
     //     return myTestProgram, nil
@@ -35,7 +36,7 @@ cfg := &client.Config{
 }
 
 // Execute with custom evaluators
-err := client.ExecuteProject(ctx, cfg, "Assignment1",
+err := client.ExecuteProject(ctx, cfg, "Assignment1", "Assignment instructions", nil,
     rubrics.EvaluateGit(osfs.New(cfg.Dir.String())),
     customEvaluator1,
     customEvaluator2,
@@ -49,8 +50,6 @@ Course-specific implementations should:
 1. Import gradebot as a dependency
 2. Implement course-specific evaluators
 3. Provide ExecuteProjectX functions that call `client.ExecuteProject` with appropriate evaluators
-
-Example: Course-specific implementations should import this library
 
 ## Development
 

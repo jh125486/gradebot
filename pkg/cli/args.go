@@ -22,8 +22,8 @@ type CommonArgs struct {
 	Stdin  io.Reader    `kong:"-"` // For testing - can inject stdin for prompts
 	Stdout io.Writer    `kong:"-"` // For testing - can capture output
 
-	// CommandFactory creates commands for execution. Can be injected in tests.
-	CommandFactory rubrics.CommandFactory `kong:"-"`
+	// CommandBuilder creates commands for execution. Can be injected in tests.
+	CommandBuilder rubrics.CommandBuilder `kong:"-"`
 }
 
 // AfterApply is a Kong hook that initializes the HTTP client with the build ID.
