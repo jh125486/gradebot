@@ -18,6 +18,7 @@ All code must follow idiomatic Go conventions and standard library best practice
   - `pkg/` - Public library code
   - `internal/` - Private application code
   - `proto/` - Protocol buffer definitions
+- **Functional Options**: Use functional options pattern for complex struct initialization.
 
 ## Testing Guidelines
 
@@ -302,3 +303,4 @@ func createTestStorage(t *testing.T) *Storage {
 ---
 
 **Remember**: Write code for humans first, computers second. Clarity beats cleverness.
+**DO NOT**: Use awk, sed, Python or other non-IDE tools to modify code.

@@ -3,25 +3,32 @@ package rubrics
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 )
 
 // Commander defines an interface that wraps an external command.
 // This is a subset of exec.Cmd to allow for mocking.
-type Commander interface {
-	SetDir(dir string)
-	SetStdin(stdin io.Reader)
-	SetStdout(stdout io.Writer)
-	SetStderr(stderr io.Writer)
-	// Start begins execution without waiting for completion. Run may block
-	// until the process exits.
-	Start() error
-	Run() error
-	ProcessKill() error
-}
+type (
+	Commander interface {
+		SetDir(dir string)
+		StreamSetter
 
-// CommandFactory defines an interface for creating new commands.
-type CommandFactory interface {
+		// Start begins execution without waiting for completion.
+		// Run may block until the process exits.
+		Start() error
+		Run() error
+		ProcessKill() error
+	}
+	StreamSetter interface {
+		SetStdin(stdin io.Reader)
+		SetStdout(stdout io.Writer)
+		SetStderr(stderr io.Writer)
+	}
+)
+
+// CommandBuilder defines an interface for creating new commands.
+type CommandBuilder interface {
 	New(name string, arg ...string) Commander
 }
 
@@ -66,24 +73,35 @@ func (c *execCmd) Run() error {
 	return c.Cmd.Run()
 }
 
-// ExecCommandFactory is the production implementation of CommandFactory.
-type ExecCommandFactory struct {
+// ExecCommandBuilder is the production implementation of CommandBuilder.
+// It is used internally by Program to create executable commands.
+type ExecCommandBuilder struct {
 	context.Context
+	Env map[string]string
 }
 
 // New creates a new execCmd wrapper.
-func (f *ExecCommandFactory) New(name string, arg ...string) Commander {
-	return &execCmd{Cmd: exec.CommandContext(f.Context, name, arg...)}
+func (b *ExecCommandBuilder) New(name string, arg ...string) Commander {
+	cmd := exec.CommandContext(b.Context, name, arg...)
+
+	// Set environment variables if provided
+	if len(b.Env) > 0 {
+		env := os.Environ()
+		for key, value := range b.Env {
+			env = append(env, key+"="+value)
+		}
+		cmd.Env = env
+	}
+
+	return &execCmd{Cmd: cmd}
 }
 
-// ProgramRunner is the interface used by rubrics to run student programs.
-// It is declared here so runner-related abstractions live together.
 // ProgramRunner is the interface used by rubrics to run student programs.
 // It is declared here so runner-related abstractions live together.
 type ProgramRunner interface {
 	Path() string
 	Run(args ...string) error
-	Do(in string) ([]string, []string, error)
+	Do(in string) (stdout, stderr []string, err error)
 	Kill() error
 	Cleanup(ctx context.Context) error
 }

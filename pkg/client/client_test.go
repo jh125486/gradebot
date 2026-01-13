@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -360,7 +361,9 @@ func TestExecuteProject(t *testing.T) {
 		projectName string
 		evaluators  []rubrics.Evaluator
 		wantErr     bool
+		bag         rubrics.RunBag
 		checkOutput func(t *testing.T, output string)
+		verify      func(t *testing.T, cfg *client.Config, bag rubrics.RunBag)
 	}{
 		{
 			name: "simple_project_execution",
@@ -371,7 +374,7 @@ func TestExecuteProject(t *testing.T) {
 					RunCmd:         "echo test",
 					Writer:         new(bytes.Buffer),
 					Reader:         strings.NewReader("n\n"),
-					CommandFactory: &mockCommandFactory{},
+					ProgramBuilder: newMockProgramBuilder(),
 				}
 			},
 			projectName: "TestProject",
@@ -403,7 +406,7 @@ func TestExecuteProject(t *testing.T) {
 					RunCmd:         "echo test",
 					Writer:         output,
 					Reader:         strings.NewReader("n\n"),
-					CommandFactory: &mockCommandFactory{},
+					ProgramBuilder: newMockProgramBuilder(),
 				}
 			},
 			projectName: "MultiEvalProject",
@@ -433,7 +436,7 @@ func TestExecuteProject(t *testing.T) {
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("y\n"),
 					RubricClient:   &mockRubricServiceClient{},
-					CommandFactory: &mockCommandFactory{},
+					ProgramBuilder: newMockProgramBuilder(),
 				}
 			},
 			projectName: "UploadProject",
@@ -454,7 +457,7 @@ func TestExecuteProject(t *testing.T) {
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("y\n"),
 					RubricClient:   &mockRubricServiceClient{uploadErr: errors.New("upload failed")},
-					CommandFactory: &mockCommandFactory{},
+					ProgramBuilder: newMockProgramBuilder(),
 				}
 			},
 			projectName: "UploadErrorProject",
@@ -478,8 +481,7 @@ func TestExecuteProject(t *testing.T) {
 					RunCmd: "echo test",
 					Writer: io.Discard,
 					Reader: strings.NewReader("n\n"),
-					// Use real command factory to trigger real cleanup
-					CommandFactory: nil, // will use default
+					// Use default factory (nil) to trigger real cleanup
 				}
 			},
 			projectName: "CleanupErrorProject",
@@ -498,12 +500,79 @@ func TestExecuteProject(t *testing.T) {
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("n\n"),
 					QualityClient:  &mockQualityServiceClient{},
-					CommandFactory: &mockCommandFactory{},
+					ProgramBuilder: newMockProgramBuilder(),
 				}
 			},
 			projectName: "QualityProject",
 			evaluators:  []rubrics.Evaluator{},
 			wantErr:     false,
+		},
+		{
+			name: "uses_provided_program_factory_and_bag",
+			setupConfig: func() *client.Config {
+				dir := t.TempDir()
+				return &client.Config{
+					Dir:            client.WorkDir(dir),
+					RunCmd:         "echo test",
+					Writer:         io.Discard,
+					Reader:         strings.NewReader("n\n"),
+					ProgramBuilder: newMockProgramBuilder(),
+				}
+			},
+			projectName: "ProvidedProgram",
+			evaluators: []rubrics.Evaluator{
+				func(_ context.Context, _ rubrics.ProgramRunner, bag rubrics.RunBag) rubrics.RubricItem {
+					bag["touched"] = true
+					return rubrics.RubricItem{Name: "Bag", Points: 5, Awarded: 5}
+				},
+			},
+			bag:     rubrics.RunBag{"seed": "value"},
+			wantErr: false,
+			verify: func(t *testing.T, cfg *client.Config, bag rubrics.RunBag) {
+				t.Helper()
+				if touched, ok := bag["touched"].(bool); !ok || !touched {
+					t.Errorf("bag should be mutated by evaluator, got touched=%v ok=%v", bag["touched"], ok)
+				}
+				if seed, ok := bag["seed"]; !ok || seed != "value" {
+					t.Errorf("bag should preserve existing entries, got seed=%v ok=%v", seed, ok)
+				}
+			},
+		},
+		{
+			name: "program_builder_error",
+			setupConfig: func() *client.Config {
+				dir := t.TempDir()
+				return &client.Config{
+					Dir:    client.WorkDir(dir),
+					RunCmd: "echo test",
+					Writer: io.Discard,
+					Reader: strings.NewReader("n\n"),
+					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+						return nil, fmt.Errorf("builder failed")
+					},
+				}
+			},
+			projectName: "BuilderErrorProject",
+			evaluators:  []rubrics.Evaluator{},
+			wantErr:     true,
+		},
+		{
+			name: "program_run_error",
+			setupConfig: func() *client.Config {
+				dir := t.TempDir()
+				return &client.Config{
+					Dir:    client.WorkDir(dir),
+					RunCmd: "echo test",
+					Writer: io.Discard,
+					Reader: strings.NewReader("n\n"),
+					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+						return &stubProgramWithRunError{}, nil
+					},
+				}
+			},
+			projectName: "RunErrorProject",
+			evaluators:  []rubrics.Evaluator{},
+			wantErr:     true,
 		},
 	}
 
@@ -512,7 +581,7 @@ func TestExecuteProject(t *testing.T) {
 			t.Parallel()
 
 			cfg := tt.setupConfig()
-			err := client.ExecuteProject(ctx, cfg, tt.projectName, "", tt.evaluators...)
+			err := client.ExecuteProject(ctx, cfg, tt.projectName, "", tt.bag, tt.evaluators...)
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ExecuteProject() error = %v, wantErr %v", err, tt.wantErr)
@@ -522,6 +591,10 @@ func TestExecuteProject(t *testing.T) {
 				if buf, ok := cfg.Writer.(*bytes.Buffer); ok {
 					tt.checkOutput(t, buf.String())
 				}
+			}
+
+			if tt.verify != nil {
+				tt.verify(t, cfg, tt.bag)
 			}
 		})
 	}
@@ -559,22 +632,6 @@ func (m *mockRubricServiceClient) UploadRubricResult(_ context.Context, _ *conne
 	}), nil
 }
 
-type mockCommandFactory struct{}
-
-func (m *mockCommandFactory) New(name string, arg ...string) rubrics.Commander {
-	return &mockCommander{}
-}
-
-type mockCommander struct{}
-
-func (m *mockCommander) SetDir(dir string)          {}
-func (m *mockCommander) SetStdin(stdin io.Reader)   {}
-func (m *mockCommander) SetStdout(stdout io.Writer) {}
-func (m *mockCommander) SetStderr(stderr io.Writer) {}
-func (m *mockCommander) Start() error               { return nil }
-func (m *mockCommander) Run() error                 { return nil }
-func (m *mockCommander) ProcessKill() error         { return nil }
-
 type mockQualityServiceClient struct {
 	protoconnect.UnimplementedQualityServiceHandler
 }
@@ -584,4 +641,56 @@ func (m *mockQualityServiceClient) EvaluateCodeQuality(_ context.Context, _ *con
 		QualityScore: 85,
 		Feedback:     "Code quality is good",
 	}), nil
+}
+
+type stubProgram struct {
+	path          string
+	runCalled     bool
+	cleanupCalled bool
+}
+
+func (s *stubProgram) Path() string { return s.path }
+
+func (s *stubProgram) Run(_ ...string) error {
+	s.runCalled = true
+	return nil
+}
+
+func (s *stubProgram) Do(string) (stdout, stderr []string, err error) {
+	return nil, nil, nil
+}
+
+func (s *stubProgram) Kill() error { return nil }
+
+func (s *stubProgram) Cleanup(context.Context) error {
+	s.cleanupCalled = true
+	return nil
+}
+
+// stubProgramWithRunError is a stub program that fails when Run is called.
+type stubProgramWithRunError struct{}
+
+func (s *stubProgramWithRunError) Path() string {
+	return "/stub"
+}
+
+func (s *stubProgramWithRunError) Run(_ ...string) error {
+	return errors.New("program run failed")
+}
+
+func (s *stubProgramWithRunError) Do(string) (stdout, stderr []string, err error) {
+	return nil, nil, nil
+}
+
+func (s *stubProgramWithRunError) Kill() error { return nil }
+
+func (s *stubProgramWithRunError) Cleanup(context.Context) error {
+	return nil
+}
+
+// newMockProgramBuilder creates a ProgramBuilder that returns stub programs for testing.
+func newMockProgramBuilder() func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+	return func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
+		return &stubProgram{path: workDir}, nil
+	}
 }

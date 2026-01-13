@@ -1,11 +1,15 @@
 package rubrics_test
 
 import (
+	"context"
 	"errors"
 	"io"
+	"os"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -13,6 +17,8 @@ import (
 
 	"github.com/jh125486/gradebot/pkg/rubrics"
 )
+
+const osWindows = "windows"
 
 // TestSafeBufferBasicOperations tests basic SafeBuffer operations
 func TestSafeBufferBasicOperations(t *testing.T) {
@@ -239,12 +245,12 @@ func (m *MockCommander) ProcessKill() error {
 	return args.Error(0)
 }
 
-// MockCommandFactory is a mock implementation of the CommandFactory interface.
-type MockCommandFactory struct {
+// MockCommandBuilder is a mock implementation of the CommandBuilder interface.
+type MockCommandBuilder struct {
 	mock.Mock
 }
 
-func (m *MockCommandFactory) New(name string, arg ...string) rubrics.Commander {
+func (m *MockCommandBuilder) New(name string, arg ...string) rubrics.Commander {
 	args := m.Called(name, arg)
 	return args.Get(0).(rubrics.Commander)
 }
@@ -255,28 +261,28 @@ func TestNewProgram(t *testing.T) {
 		name        string
 		workDir     string
 		runCmd      string
-		factory     rubrics.CommandFactory
+		builder     rubrics.CommandBuilder
 		wantWorkDir string
 	}{
 		{
 			name:        "SimplePath",
 			workDir:     "/tmp/workdir",
 			runCmd:      "go run .",
-			factory:     nil,
+			builder:     nil,
 			wantWorkDir: "/tmp/workdir",
 		},
 		{
 			name:        "EmptyRunCmd",
 			workDir:     ".",
 			runCmd:      "",
-			factory:     &MockCommandFactory{},
+			builder:     &MockCommandBuilder{},
 			wantWorkDir: ".", // Will be converted to absolute path
 		},
 		{
-			name:        "WithFactory",
+			name:        "WithBuilder",
 			workDir:     "/home/test",
 			runCmd:      "python -m pytest",
-			factory:     &MockCommandFactory{},
+			builder:     &MockCommandBuilder{},
 			wantWorkDir: "/home/test",
 		},
 	}
@@ -284,7 +290,7 @@ func TestNewProgram(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			prog := rubrics.NewProgram(tc.workDir, tc.runCmd, tc.factory)
+			prog := rubrics.NewProgram(tc.workDir, tc.runCmd, tc.builder)
 
 			// For relative paths, the result will be absolute
 			if tc.workDir == "." {
@@ -327,46 +333,46 @@ func TestProgram_Run(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		setup   func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander)
+		setup   func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander)
 		args    []string
 		wantErr bool
 	}{
 		{
 			name: "SuccessfulRun",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
-				return rubrics.NewProgram(".", "go", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "go", mockBuilder), mockBuilder, mockCmd
 			},
 			args:    []string{"run", "."},
 			wantErr: false,
 		},
 		{
 			name: "StartError",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
+				mockBuilder := new(MockCommandBuilder)
 				startError := errors.New("command failed to start")
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(startError)
-				return rubrics.NewProgram(".", "go", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "go", mockBuilder), mockBuilder, mockCmd
 			},
 			args:    []string{"run", "."},
 			wantErr: true,
 		},
 		{
 			name: "ChdirFails",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram("/a/path/that/most/definitely/does/not/exist", "go", nil), nil, nil
 			},
 			args:    []string{"run", "."},
@@ -374,15 +380,15 @@ func TestProgram_Run(t *testing.T) {
 		},
 		{
 			name: "NoRunCommand",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "", nil), nil, nil
 			},
 			args:    []string{},
 			wantErr: true,
 		},
 		{
-			name: "NoFactory",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			name: "NoBuilder",
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
 			args:    []string{"run", "."},
@@ -390,76 +396,76 @@ func TestProgram_Run(t *testing.T) {
 		},
 		{
 			name: "ArgsOverrideRunCmd",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "go", []string{"test"}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "go", []string{"test"}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
-				return rubrics.NewProgram(".", "go build", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "go build", mockBuilder), mockBuilder, mockCmd
 			},
 			args:    []string{"test"}, // These args should override the "build" part
 			wantErr: false,
 		},
 		{
 			name: "ArgsProvideCommandName",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "python", []string{"-m", "pytest"}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "python", []string{"-m", "pytest"}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
-				return rubrics.NewProgram(".", "", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "", mockBuilder), mockBuilder, mockCmd
 			},
 			args:    []string{"python", "-m", "pytest"},
 			wantErr: false,
 		},
 		{
 			name: "SingleArgAsCommand",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "ls", []string(nil)).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "ls", []string(nil)).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
-				return rubrics.NewProgram(".", "", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "", mockBuilder), mockBuilder, mockCmd
 			},
 			args:    []string{"ls"},
 			wantErr: false,
 		},
 		{
 			name: "GetWdFails",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				// This is hard to test without changing the current directory,
 				// but we can test chdir failure above
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
 			args:    []string{"run", "."},
-			wantErr: false, // no factory so returns nil
+			wantErr: false, // no builder so returns nil
 		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			prog, factory, mockCmd := tc.setup()
+			prog, builder, mockCmd := tc.setup()
 			err := prog.Run(tc.args...)
 			if tc.wantErr {
 				assert.Error(t, err)
 			} else {
 				assert.NoError(t, err)
 			}
-			if factory != nil {
-				factory.AssertExpectations(t)
+			if builder != nil {
+				builder.AssertExpectations(t)
 			}
 			if mockCmd != nil {
 				mockCmd.AssertExpectations(t)
@@ -473,7 +479,7 @@ func TestProgram_Do(t *testing.T) {
 	tests := []struct {
 		name       string
 		input      string
-		setup      func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander)
+		setup      func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander)
 		wantErr    bool
 		wantStdout []string
 		wantStderr []string
@@ -482,7 +488,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "SimpleInput_NoProcess",
 			input: "test input",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
 			wantErr:    false,
@@ -493,7 +499,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "InputWithRunningProcess",
 			input: "GET testkey",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
 			wantErr:    false,
@@ -504,7 +510,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "EmptyInput",
 			input: "",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "", nil), nil, nil
 			},
 			wantErr:    false,
@@ -515,7 +521,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "MultiLineInput",
 			input: "first line\nsecond line",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "python", nil), nil, nil
 			},
 			wantErr:    false,
@@ -526,26 +532,23 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "StdinWriteError",
 			input: "test input",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
 
-				prog := rubrics.NewProgram(".", "go", mockFactory)
 				// Inject a failing writer to simulate stdin write error
-				prog.SetStdinWriterFactory(func() (io.Reader, io.WriteCloser) {
-					return strings.NewReader(""), &FailingWriter{}
-				})
+				prog := rubrics.NewProgram(".", "go", mockBuilder, rubrics.WithReaderWriter(strings.NewReader(""), &FailingWriter{}))
 
 				// Run the process to set up stdinW with our failing writer
 				_ = prog.Run("run", ".")
 
-				return prog, mockFactory, mockCmd
+				return prog, mockBuilder, mockCmd
 			},
 			wantErr:    true, // We expect an error from the failing stdin write
 			wantStdout: nil,
@@ -555,31 +558,25 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "OutputPollingWithBufferedOutput",
 			input: "command with buffered output",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
 
-				prog := rubrics.NewProgram(".", "go", mockFactory)
 				// Use a custom stdin writer that doesn't block
-				prog.SetStdinWriterFactory(func() (io.Reader, io.WriteCloser) {
-					// Create a non-blocking writer using a buffer
-					reader := strings.NewReader("")
-					writer := &MockWriteCloser{}
-					return reader, writer
-				})
+				prog := rubrics.NewProgram(".", "go", mockBuilder, rubrics.WithReaderWriter(strings.NewReader(""), &MockWriteCloser{}))
 
 				// Set up the process and pre-populate output buffers
 				_ = prog.Run("run", ".")
 
 				// The test will exercise the Do method paths even without direct buffer access
 
-				return prog, mockFactory, mockCmd
+				return prog, mockBuilder, mockCmd
 			},
 			wantErr:    false,
 			wantStdout: nil,
@@ -589,7 +586,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "OutputPollingWithImmediateOutput",
 			input: "command with output",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				// Test without actually running a process to avoid pipe blocking
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
@@ -601,7 +598,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "EmptyOutputStrings",
 			input: "test",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				// Test the edge case where prevLen >= current length
 				prog := rubrics.NewProgram(".", "go", nil)
 				// We can't access private fields, so let's use a different approach
@@ -616,7 +613,7 @@ func TestProgram_Do(t *testing.T) {
 		{
 			name:  "ScannerEdgeCases",
 			input: "test scanner",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				// Test without running process to avoid pipe blocking
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
@@ -625,14 +622,36 @@ func TestProgram_Do(t *testing.T) {
 			wantStderr: nil,
 			runFirst:   false,
 		},
+		{
+			name:  "NoInputWriter",
+			input: "input",
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
+				mockCmd := NewMockCommander()
+				mockBuilder := new(MockCommandBuilder)
+				// Expect args passed by TestProgram_Do harness ("run", ".")
+				mockBuilder.On("New", "echo", []string{"run", "."}).Return(mockCmd)
+				mockCmd.On("SetDir", mock.Anything).Return()
+				mockCmd.On("SetStdin", mock.Anything).Return()
+				mockCmd.On("SetStdout", mock.Anything).Return()
+				mockCmd.On("SetStderr", mock.Anything).Return()
+				mockCmd.On("Start").Return(nil)
+
+				prog := rubrics.NewProgram(".", "echo hello", mockBuilder, rubrics.WithReaderWriter(nil, nil))
+				return prog, mockBuilder, mockCmd
+			},
+			wantErr:    false,
+			wantStdout: nil,
+			wantStderr: nil,
+			runFirst:   true,
+		},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			prog, factory, mockCmd := tc.setup()
+			prog, builder, mockCmd := tc.setup()
 
-			if tc.runFirst && factory != nil {
+			if tc.runFirst && builder != nil {
 				err := prog.Run("run", ".")
 				assert.NoError(t, err)
 			}
@@ -646,8 +665,8 @@ func TestProgram_Do(t *testing.T) {
 			assert.Equal(t, tc.wantStdout, outLines)
 			assert.Equal(t, tc.wantStderr, errOutLines)
 
-			if factory != nil {
-				factory.AssertExpectations(t)
+			if builder != nil {
+				builder.AssertExpectations(t)
 			}
 			if mockCmd != nil {
 				mockCmd.AssertExpectations(t)
@@ -660,48 +679,48 @@ func TestProgram_Kill(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name            string
-		setup           func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander)
+		setup           func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander)
 		expectKillError require.ErrorAssertionFunc
 		runFirst        bool
 	}{
 		{
 			name: "KillSuccessful",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder := new(MockCommandBuilder)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
 				mockCmd.On("ProcessKill").Return(nil)
-				return rubrics.NewProgram(".", "go", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "go", mockBuilder), mockBuilder, mockCmd
 			},
 			expectKillError: require.NoError,
 			runFirst:        true,
 		},
 		{
 			name: "KillFails",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				mockCmd := NewMockCommander()
-				mockFactory := new(MockCommandFactory)
+				mockBuilder := new(MockCommandBuilder)
 				killError := errors.New("kill failed")
-				mockFactory.On("New", "go", []string{"run", "."}).Return(mockCmd)
+				mockBuilder.On("New", "go", []string{"run", "."}).Return(mockCmd)
 				mockCmd.On("SetDir", mock.Anything).Return()
 				mockCmd.On("SetStdin", mock.Anything).Return()
 				mockCmd.On("SetStdout", mock.Anything).Return()
 				mockCmd.On("SetStderr", mock.Anything).Return()
 				mockCmd.On("Start").Return(nil)
 				mockCmd.On("ProcessKill").Return(killError)
-				return rubrics.NewProgram(".", "go", mockFactory), mockFactory, mockCmd
+				return rubrics.NewProgram(".", "go", mockBuilder), mockBuilder, mockCmd
 			},
 			expectKillError: require.Error,
 			runFirst:        true,
 		},
 		{
 			name: "KillNoProcess",
-			setup: func() (rubrics.ProgramRunner, *MockCommandFactory, *MockCommander) {
+			setup: func() (rubrics.ProgramRunner, *MockCommandBuilder, *MockCommander) {
 				return rubrics.NewProgram(".", "go", nil), nil, nil
 			},
 			expectKillError: require.NoError,
@@ -712,7 +731,7 @@ func TestProgram_Kill(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
-			prog, factory, mockCmd := tt.setup()
+			prog, builder, mockCmd := tt.setup()
 
 			if tt.runFirst {
 				err := prog.Run("run", ".")
@@ -722,8 +741,8 @@ func TestProgram_Kill(t *testing.T) {
 			err := prog.Kill()
 			tt.expectKillError(t, err, "Kill() error assertion failed")
 
-			if factory != nil {
-				factory.AssertExpectations(t)
+			if builder != nil {
+				builder.AssertExpectations(t)
 			}
 			if mockCmd != nil && tt.runFirst {
 				mockCmd.AssertCalled(t, "ProcessKill")
@@ -765,8 +784,8 @@ func TestProgram_Cleanup(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			factory := &rubrics.ExecCommandFactory{Context: t.Context()}
-			prog := rubrics.NewProgram(tt.workDir, tt.runCmd, factory)
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
+			prog := rubrics.NewProgram(tt.workDir, tt.runCmd, builder)
 
 			err := prog.Cleanup(t.Context())
 
@@ -777,4 +796,66 @@ func TestProgram_Cleanup(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestProgramRunPhysicalChdir(t *testing.T) {
+	// Not running parallel as it modifies global state (cwd)
+
+	currentDir, err := os.Getwd()
+	require.NoError(t, err)
+
+	tempDir := t.TempDir()
+
+	// Create a dummy builder that just verifies we are in the tempDir
+	mockBuilder := &MockCommandBuilder{}
+	mockCmd := NewMockCommander()
+	mockBuilder.On("New", "echo", []string{"hello"}).Return(mockCmd)
+	mockCmd.On("SetDir", tempDir).Return()
+	mockCmd.On("SetStdin", mock.Anything).Return()
+	mockCmd.On("SetStdout", mock.Anything).Return()
+	mockCmd.On("SetStderr", mock.Anything).Return()
+	mockCmd.On("Start").Return(nil)
+
+	prog := rubrics.NewProgram(tempDir, "echo hello", mockBuilder)
+	err = prog.Run()
+	require.NoError(t, err)
+
+	// Verify we are back in the original directory
+	afterDir, err := os.Getwd()
+	require.NoError(t, err)
+	assert.Equal(t, currentDir, afterDir)
+
+	mockBuilder.AssertExpectations(t)
+	mockCmd.AssertExpectations(t)
+}
+
+func TestProgramDoIntegration(t *testing.T) {
+	if runtime.GOOS == osWindows {
+		t.Skip("skipping on windows")
+	}
+
+	ctx := context.Background()
+
+	// Use 'cat' which echoes stdin to stdout
+	runCmd := "cat"
+
+	builder := &rubrics.ExecCommandBuilder{Context: ctx}
+
+	prog := rubrics.NewProgram(t.TempDir(), runCmd, builder)
+
+	err := prog.Run()
+	require.NoError(t, err)
+	defer prog.Kill()
+
+	// Allow process to start up
+	time.Sleep(100 * time.Millisecond)
+
+	stdout, _, err := prog.Do("hello")
+	require.NoError(t, err)
+
+	assert.Contains(t, stdout, "hello")
+
+	stdout, _, err = prog.Do("world")
+	require.NoError(t, err)
+	assert.Contains(t, stdout, "world")
 }

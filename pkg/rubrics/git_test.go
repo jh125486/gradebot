@@ -28,8 +28,6 @@ func (f *failingChrootFS) Chroot(path string) (billy.Filesystem, error) {
 }
 
 // setupGitRepoWithCommit creates a git repo with an initial commit
-//
-
 func setupGitRepoWithCommit(t *testing.T) billy.Filesystem {
 	t.Helper()
 	fs := memfs.New()
@@ -63,8 +61,6 @@ func setupGitRepoWithCommit(t *testing.T) billy.Filesystem {
 }
 
 // setupEmptyGitRepo creates a git repo without commits
-//
-
 func setupEmptyGitRepo(t *testing.T) billy.Filesystem {
 	t.Helper()
 	fs := memfs.New()
@@ -81,8 +77,6 @@ func setupEmptyGitRepo(t *testing.T) billy.Filesystem {
 }
 
 // setupInvalidGitDir creates a .git directory without proper git structure
-//
-
 func setupInvalidGitDir(t *testing.T) billy.Filesystem {
 	t.Helper()
 	fs := memfs.New()

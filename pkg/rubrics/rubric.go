@@ -86,3 +86,20 @@ func NewResult(project string) *Result {
 		Project:      project,
 	}
 }
+
+// BagValue retrieves a pointer value from the RunBag with the specified type *T.
+// The bag must store pointer types for mutations to propagate between evaluators.
+func BagValue[T any](b RunBag, key string) *T {
+	if val, ok := b[key]; ok {
+		if typed, ok := val.(*T); ok {
+			return typed
+		}
+	}
+
+	return nil
+}
+
+// SetBagValue stores a pointer value in the RunBag with the specified key.
+func SetBagValue[T any](b RunBag, key string, v *T) {
+	b[key] = v
+}
