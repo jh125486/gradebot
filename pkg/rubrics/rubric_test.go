@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
 	r "github.com/jh125486/gradebot/pkg/rubrics"
 )
 
@@ -94,6 +97,109 @@ func TestNewResult(t *testing.T) {
 			res := r.NewResult(tt.name)
 			if res == nil {
 				t.Fatalf("empty Result")
+			}
+		})
+	}
+}
+
+func TestBagValue(t *testing.T) {
+	t.Parallel()
+
+	strVal := "hello"
+	intVal := 42
+
+	type args struct {
+		bag r.RunBag
+		key string
+	}
+	tests := []struct {
+		name string
+		args args
+		want *string
+	}{
+		{
+			name: "found string",
+			args: args{
+				bag: r.RunBag{"str": &strVal},
+				key: "str",
+			},
+			want: &strVal,
+		},
+		{
+			name: "missing key",
+			args: args{
+				bag: r.RunBag{},
+				key: "unknown",
+			},
+			want: nil,
+		},
+		{
+			name: "wrong type in bag",
+			args: args{
+				bag: r.RunBag{"int": &intVal},
+				key: "int",
+			},
+			want: nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := r.BagValue[string](tt.args.bag, tt.args.key)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestSetBagValue(t *testing.T) {
+	t.Parallel()
+
+	type args struct {
+		bag  r.RunBag
+		key  string
+		pVal *string
+	}
+	tests := []struct {
+		name   string
+		args   args
+		verify func(*testing.T, r.RunBag)
+	}{
+		{
+			name: "sets new value",
+			args: args{
+				bag:  make(r.RunBag),
+				key:  "new-key",
+				pVal: func() *string { s := "val"; return &s }(),
+			},
+			verify: func(t *testing.T, b r.RunBag) {
+				got := r.BagValue[string](b, "new-key")
+				require.NotNil(t, got)
+				assert.Equal(t, "val", *got)
+			},
+		},
+		{
+			name: "overwrites existing",
+			args: args{
+				bag: func() r.RunBag {
+					s := "old"
+					return r.RunBag{"key": &s}
+				}(),
+				key:  "key",
+				pVal: func() *string { s := "new"; return &s }(),
+			},
+			verify: func(t *testing.T, b r.RunBag) {
+				got := r.BagValue[string](b, "key")
+				require.NotNil(t, got)
+				assert.Equal(t, "new", *got)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			r.SetBagValue(tt.args.bag, tt.args.key, tt.args.pVal)
+			if tt.verify != nil {
+				tt.verify(t, tt.args.bag)
 			}
 		})
 	}
