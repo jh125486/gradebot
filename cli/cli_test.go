@@ -1,4 +1,4 @@
-package app_test
+package cli_test
 
 import (
 	"context"
@@ -8,15 +8,16 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/jh125486/gradebot/pkg/app"
-	"github.com/jh125486/gradebot/pkg/cli"
+	"github.com/jh125486/gradebot/cli"
+	basecli "github.com/jh125486/gradebot/pkg/cli"
 	pb "github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/storage"
 )
 
-func TestServerCmd_AfterApply(t *testing.T) {
-	// Cannot run subtests in parallel - they share the same PostgreSQL database
-	// and create the same schema, causing "duplicate key value violates unique constraint" errors
+func TestServerCmd_New(t *testing.T) {
+	t.Parallel()
+
+	databaseURL := os.Getenv("DATABASE_URL")
 
 	type args struct {
 		databaseURL    string
@@ -29,44 +30,58 @@ func TestServerCmd_AfterApply(t *testing.T) {
 		openAIAPIKey   string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		setup   func(t *testing.T)
-		verify  func(t *testing.T, cmd *app.CLI)
+		name       string
+		args       args
+		wantErr    bool
+		setup      func(t *testing.T)
+		verify     func(t *testing.T, svc *cli.Service)
+		requiresDB bool
 	}{
 		{
-			name: "sql_storage_with_valid_connection",
+			name: "SQL storage with valid connection",
 			args: args{
-				databaseURL: os.Getenv("DATABASE_URL"),
+				databaseURL: databaseURL,
 			},
-			wantErr: false,
-			verify: func(t *testing.T, cmd *app.CLI) {
-				assert.NotNil(t, cmd.Storage)
-				assert.Nil(t, cmd.OpenAIClient)
+			wantErr:    false,
+			requiresDB: true,
+			verify: func(t *testing.T, svc *cli.Service) {
+				assert.NotNil(t, svc.Storage)
+				assert.Nil(t, svc.OpenAIClient)
 			},
 		},
 		{
-			name: "sql_storage_with_openai_key",
+			name: "SQL storage with OpenAI key",
 			args: args{
-				databaseURL:  os.Getenv("DATABASE_URL"),
+				databaseURL:  databaseURL,
 				openAIAPIKey: "sk-test-key-12345",
 			},
-			wantErr: false,
-			verify: func(t *testing.T, cmd *app.CLI) {
-				assert.NotNil(t, cmd.Storage)
-				assert.NotNil(t, cmd.OpenAIClient)
+			wantErr:    false,
+			requiresDB: true,
+			verify: func(t *testing.T, svc *cli.Service) {
+				assert.NotNil(t, svc.Storage)
+				assert.NotNil(t, svc.OpenAIClient)
 			},
 		},
 		{
-			name: "sql_storage_missing_database_url",
+			name: "OpenAI key with no storage",
+			args: args{
+				openAIAPIKey: "sk-test-key-12345",
+			},
+			wantErr: true,
+			verify: func(t *testing.T, svc *cli.Service) {
+				assert.Nil(t, svc.Storage)
+				assert.NotNil(t, svc.OpenAIClient)
+			},
+		},
+		{
+			name: "SQL storage missing database URL",
 			args: args{
 				databaseURL: "",
 			},
 			wantErr: true,
 		},
 		{
-			name: "r2_storage_missing_endpoint",
+			name: "R2 storage missing endpoint",
 			args: args{
 				r2Endpoint: "",
 				r2Bucket:   "test-bucket",
@@ -74,7 +89,7 @@ func TestServerCmd_AfterApply(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "r2_storage_missing_bucket",
+			name: "R2 storage missing bucket",
 			args: args{
 				r2Endpoint: "https://test.r2.cloudflarestorage.com",
 				r2Region:   "auto",
@@ -83,21 +98,21 @@ func TestServerCmd_AfterApply(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "sql_storage_invalid_url",
+			name: "SQL storage invalid URL",
 			args: args{
 				databaseURL: "invalid://url",
 			},
 			wantErr: true,
 		},
 		{
-			name: "sql_storage_malformed_url",
+			name: "SQL storage malformed URL",
 			args: args{
 				databaseURL: "postgres://invalid",
 			},
 			wantErr: true,
 		},
 		{
-			name: "sql_storage_connection_refused",
+			name: "SQL storage connection refused",
 			args: args{
 				databaseURL: "postgresql://user:pass@localhost:54321/nonexistent",
 			},
@@ -113,15 +128,38 @@ func TestServerCmd_AfterApply(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "empty_openai_key_does_not_initialize_client",
+			name: "R2 storage invalid endpoint",
 			args: args{
-				databaseURL:  os.Getenv("DATABASE_URL"),
+				r2Endpoint: "http://127.0.0.1:1",
+				r2Region:   "auto",
+				r2Bucket:   "test-bucket",
+			},
+			wantErr: true,
+		},
+		{
+			name: "Empty OpenAI key does not initialize baseclient",
+			args: args{
+				databaseURL:  databaseURL,
 				openAIAPIKey: "",
 			},
-			wantErr: false,
-			verify: func(t *testing.T, cmd *app.CLI) {
-				assert.NotNil(t, cmd.Storage)
-				assert.Nil(t, cmd.OpenAIClient)
+			wantErr:    false,
+			requiresDB: true,
+			verify: func(t *testing.T, svc *cli.Service) {
+				assert.NotNil(t, svc.Storage)
+				assert.Nil(t, svc.OpenAIClient)
+			},
+		},
+		{
+			name: "OpenAI key does not initialize baseclient",
+			args: args{
+				databaseURL:  databaseURL,
+				openAIAPIKey: "abcd",
+			},
+			wantErr:    false,
+			requiresDB: true,
+			verify: func(t *testing.T, svc *cli.Service) {
+				assert.NotNil(t, svc.Storage)
+				assert.NotNil(t, svc.OpenAIClient)
 			},
 		},
 	}
@@ -129,11 +167,15 @@ func TestServerCmd_AfterApply(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Cannot run in parallel - tests share same database
+			if tt.requiresDB && databaseURL == "" {
+				t.Skip("DATABASE_URL not set, skipping test that requires database")
+			}
+
 			if tt.setup != nil {
 				tt.setup(t)
 			}
 
-			cmd := &app.CLI{
+			cmd := &cli.CLI{
 				DatabaseURL:    tt.args.databaseURL,
 				R2Endpoint:     tt.args.r2Endpoint,
 				R2Region:       tt.args.r2Region,
@@ -144,24 +186,21 @@ func TestServerCmd_AfterApply(t *testing.T) {
 				OpenAIAPIKey:   tt.args.openAIAPIKey,
 			}
 
-			ctx := cli.Context{Context: context.Background()}
-			err := cmd.AfterApply(ctx)
-
+			ctx := basecli.Context{Context: t.Context()}
+			svc, err := cli.New(ctx, cmd)
 			if tt.wantErr {
 				assert.Error(t, err)
 				return
 			}
-
 			require.NoError(t, err)
-			assert.NotNil(t, cmd.Storage)
 
 			if tt.verify != nil {
-				tt.verify(t, cmd)
+				tt.verify(t, svc)
 			}
 
 			// Cleanup
-			if cmd.Storage != nil {
-				_ = cmd.Storage.Close()
+			if svc.Storage != nil {
+				_ = svc.Storage.Close()
 			}
 		})
 	}
@@ -172,30 +211,16 @@ func TestServerCmd_Run(t *testing.T) {
 
 	tests := []struct {
 		name    string
-		setup   func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc)
+		setup   func(t *testing.T) (*cli.CLI, context.Context, context.CancelFunc)
 		wantErr bool
 	}{
 		{
-			name: "nil_storage_returns_error",
-			setup: func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc) {
-				cmd := &app.CLI{
-					Port:    "0",
-					Storage: nil,
+			name: "Canceled Context returns error",
+			setup: func(t *testing.T) (*cli.CLI, context.Context, context.CancelFunc) {
+				cmd := &cli.CLI{
+					Port: "0",
 				}
-				ctx, cancel := context.WithCancel(context.Background())
-				cancel() // Cancel immediately
-				return cmd, ctx, cancel
-			},
-			wantErr: true,
-		},
-		{
-			name: "context_cancelled_returns_error",
-			setup: func(t *testing.T) (*app.CLI, context.Context, context.CancelFunc) {
-				cmd := &app.CLI{
-					Port:    "0",
-					Storage: &mockStorage{},
-				}
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(t.Context())
 				cancel() // Cancel before starting
 				return cmd, ctx, cancel
 			},
@@ -210,8 +235,8 @@ func TestServerCmd_Run(t *testing.T) {
 			cmd, ctx, cancel := tt.setup(t)
 			defer cancel()
 
-			buildID := "test-build-id-12345"
-			appCtx := cli.Context{Context: ctx}
+			buildID := basecli.BuildID("test-build-id-12345")
+			appCtx := basecli.Context{Context: ctx}
 
 			err := cmd.Run(appCtx, buildID)
 			if tt.wantErr {

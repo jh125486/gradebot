@@ -1,7 +1,6 @@
 package storage_test
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"strconv"
@@ -882,7 +881,7 @@ func TestR2Storage_Close(t *testing.T) {
 		UsePathStyle:    true,
 	}
 
-	ctx := contextlog.With(context.Background(), contextlog.DiscardLogger())
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 	store, err := storage.NewR2Storage(ctx, cfg)
 	require.NoError(t, err)
 

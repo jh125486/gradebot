@@ -16,9 +16,9 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/tomasen/realip"
 
 	"github.com/jh125486/gradebot/pkg/contextlog"
+	mw "github.com/jh125486/gradebot/pkg/middleware"
 	"github.com/jh125486/gradebot/pkg/openai"
 	pb "github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/proto/protoconnect"
@@ -26,18 +26,12 @@ import (
 )
 
 const (
-	submissionsTmplFile  = "submissions.go.tmpl"
-	submissionTmplFile   = "submission.go.tmpl"
-	indexTmplFile        = "index.go.tmpl"
-	unknownIP            = "unknown"
-	unknownLocation      = "Unknown"
-	localUnknown         = "Local/Unknown"
-	contentTypeHeader    = "Content-Type"
-	templateExecErrMsg   = "template execution error"
-	htmlContentType      = "text/html"
-	xForwardedForHeader  = "X-Forwarded-For"
-	xRealIPHeader        = "X-Real-IP"
-	cfConnectingIPHeader = "CF-Connecting-IP"
+	submissionsTmplFile = "submissions.go.tmpl"
+	submissionTmplFile  = "submission.go.tmpl"
+	indexTmplFile       = "index.go.tmpl"
+	contentTypeHeader   = "Content-Type"
+	templateExecErrMsg  = "template execution error"
+	htmlContentType     = "text/html"
 )
 
 var (
@@ -45,77 +39,18 @@ var (
 	templatesFS embed.FS
 )
 
-// IPExtractable interface for types that can provide IP extraction methods
-type IPExtractable interface {
-	Header() http.Header
-	Peer() connect.Peer
+// HTMLHandler handles HTML page rendering
+type HTMLHandler struct {
+	storage   storage.Storage
+	templates *TemplateManager
 }
 
-// extractClientIP extracts client IP from any object that implements IPExtractable
-func extractClientIP(ctx context.Context, req IPExtractable) string {
-	// Method 1: Try to get from context (set by realIP middleware)
-	if realIP, ok := ctx.Value(realIPKey).(string); ok && realIP != "" && realIP != unknownIP {
-		return realIP
+// NewHTMLHandler creates a new HTML handler
+func NewHTMLHandler(stor storage.Storage) *HTMLHandler {
+	return &HTMLHandler{
+		storage:   stor,
+		templates: NewTemplateManager(),
 	}
-
-	// Method 2: Try to extract from HTTP headers
-	if ip := extractFromXForwardedFor(req); ip != unknownIP {
-		return ip
-	}
-
-	if ip := extractFromXRealIP(req); ip != unknownIP {
-		return ip
-	}
-
-	if ip := extractFromCFConnectingIP(req); ip != unknownIP {
-		return ip
-	}
-
-	// Method 3: Try peer info as fallback
-	return extractFromPeer(req)
-}
-
-// extractFromXForwardedFor extracts IP from X-Forwarded-For header
-func extractFromXForwardedFor(req IPExtractable) string {
-	headers := req.Header()
-	if xff := headers.Get(xForwardedForHeader); xff != "" {
-		if ips := strings.Split(xff, ","); len(ips) > 0 {
-			if ip := strings.TrimSpace(ips[0]); ip != "" && ip != unknownIP {
-				return ip
-			}
-		}
-	}
-	return unknownIP
-}
-
-// extractFromXRealIP extracts IP from X-Real-IP header
-func extractFromXRealIP(req IPExtractable) string {
-	headers := req.Header()
-	if xri := headers.Get(xRealIPHeader); xri != "" && xri != unknownIP {
-		return xri
-	}
-	return unknownIP
-}
-
-// extractFromCFConnectingIP extracts IP from CF-Connecting-IP header
-func extractFromCFConnectingIP(req IPExtractable) string {
-	headers := req.Header()
-	if cfip := headers.Get(cfConnectingIPHeader); cfip != "" && cfip != unknownIP {
-		return cfip
-	}
-	return unknownIP
-}
-
-// extractFromPeer extracts IP from peer address
-func extractFromPeer(req IPExtractable) string {
-	peer := req.Peer()
-	if peer.Addr != "" {
-		if ip, _, err := net.SplitHostPort(peer.Addr); err == nil {
-			return ip
-		}
-		return peer.Addr
-	}
-	return unknownIP
 }
 
 // TemplateManager manages HTML templates
@@ -225,6 +160,25 @@ func tlsConfig() *tls.Config {
 	}
 }
 
+// HealthHandler handles health check requests for monitoring
+func HealthHandler(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set(contentTypeHeader, "application/json")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(`{"status":"healthy","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
+}
+
+// RootHandler routes requests to either the index page or project routes
+func RootHandler(w http.ResponseWriter, r *http.Request, h *HTMLHandler) {
+	// Only handle exact root path
+	if r.URL.Path == "/" {
+		ServeIndexPage(w, r, h)
+		return
+	}
+
+	// Try to handle as project submissions page or submission detail
+	HandleProjectRoutes(w, r, h)
+}
+
 // Start initializes and runs the gRPC/HTTP server on the configured port.
 // It sets up handlers for both Connect RPC services (Quality and Rubric),
 // serves embedded HTML pages for viewing submissions, and provides a health check endpoint.
@@ -246,32 +200,23 @@ func Start(ctx context.Context, cfg Config) error {
 	rubricServer := NewRubricServer(cfg.Storage)
 	rubricPath, rubricHandler := protoconnect.NewRubricServiceHandler(rubricServer)
 
+	// Create HTML handler for web pages
+	htmlHandler := NewHTMLHandler(cfg.Storage)
+
 	// Create a multiplexer to handle both services
 	mux := http.NewServeMux()
 
-	// Wrap handlers with realip middleware to extract real client IPs
-	mux.Handle(qualityPath, realIPMiddleware(AuthMiddleware(cfg.ID)(qualityHandler)))
-	mux.Handle(rubricPath, realIPMiddleware(AuthMiddleware(cfg.ID)(rubricHandler)))
+	// Wrap handlers with middleware: requestID -> logging -> realIP -> auth
+	mux.Handle(qualityPath, mw.RequestID(mw.Logging(mw.StoreRealIP(mw.AuthMiddleware(cfg.ID)(qualityHandler)))))
+	mux.Handle(rubricPath, mw.RequestID(mw.Logging(mw.StoreRealIP(mw.AuthMiddleware(cfg.ID)(rubricHandler)))))
 
 	// Serve index page with list of all projects (no auth required)
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Only handle exact root path
-		if r.URL.Path == "/" {
-			serveIndexPage(w, r, rubricServer)
-			return
-		}
-
-		// Try to handle as project submissions page or submission detail
-		handleProjectRoutes(w, r, rubricServer)
-	}))
+	mux.Handle("/", mw.RequestID(mw.Logging(mw.StoreRealIP(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		RootHandler(w, r, htmlHandler)
+	})))))
 
 	// Health check endpoint for Koyeb and monitoring
-	mux.Handle("/health", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.Header().Set(contentTypeHeader, "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"status":"healthy","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
-	}))
-
+	mux.Handle("/health", mw.RequestID(mw.Logging(http.HandlerFunc(HealthHandler))))
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
@@ -369,15 +314,15 @@ func getPaginationParams(r *http.Request) (page, pageSize int) {
 	return page, pageSize
 }
 
-// serveIndexPage serves the HTML page for viewing all projects/classes
-func serveIndexPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+// ServeIndexPage serves the HTML page for viewing all projects/classes
+func ServeIndexPage(w http.ResponseWriter, r *http.Request, h *HTMLHandler) {
 	ctx := r.Context()
 	l := contextlog.From(ctx)
 
 	w.Header().Set(contentTypeHeader, htmlContentType)
 
 	// Fetch list of projects from storage
-	projects, err := rubricServer.storage.ListProjects(ctx)
+	projects, err := h.storage.ListProjects(ctx)
 	if err != nil {
 		l.ErrorContext(ctx, "Failed to list projects from storage", slog.Any("error", err))
 		http.Error(w, "Internal server error", http.StatusInternalServerError)
@@ -392,15 +337,15 @@ func serveIndexPage(w http.ResponseWriter, r *http.Request, rubricServer *Rubric
 		slog.Int("project_count", len(projects)))
 
 	// Execute template
-	if err := rubricServer.templates.indexTmpl.Execute(w, data); err != nil {
+	if err := h.templates.indexTmpl.Execute(w, data); err != nil {
 		l.ErrorContext(ctx, templateExecErrMsg, slog.Any("error", err))
 		http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
 		return
 	}
 }
 
-// handleProjectRoutes handles /$project and /$project/$id routes
-func handleProjectRoutes(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+// HandleProjectRoutes handles /$project and /$project/$id routes
+func HandleProjectRoutes(w http.ResponseWriter, r *http.Request, h *HTMLHandler) {
 	// Parse path: /$project or /$project/$id
 	path := strings.TrimPrefix(r.URL.Path, "/")
 	parts := strings.Split(path, "/")
@@ -415,23 +360,23 @@ func handleProjectRoutes(w http.ResponseWriter, r *http.Request, rubricServer *R
 	switch len(parts) {
 	case 1:
 		// /$project - show submissions for this project
-		serveProjectSubmissionsPage(w, r, rubricServer, project)
+		serveProjectSubmissionsPage(w, r, project, h)
 	case 2:
 		// /$project/$id - show submission detail
 		submissionID := parts[1]
-		serveSubmissionDetailPage(w, r, rubricServer, project, submissionID)
+		serveSubmissionDetailPage(w, r, project, submissionID, h)
 	default:
 		http.Error(w, "Invalid path", http.StatusNotFound)
 	}
 }
 
 // executeTableContent renders just the table content for HTMX partial updates using a template
-func executeTableContent(w http.ResponseWriter, data *SubmissionsPageData, rubricServer *RubricServer) error {
-	return rubricServer.templates.tableContentTmpl.Execute(w, data)
+func executeTableContent(w http.ResponseWriter, data *SubmissionsPageData, h *HTMLHandler) error {
+	return h.templates.tableContentTmpl.Execute(w, data)
 }
 
 // serveProjectSubmissionsPage serves the HTML page for viewing submissions for a specific project
-func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project string) {
+func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, project string, h *HTMLHandler) {
 	ctx := r.Context()
 
 	// Get pagination parameters
@@ -440,7 +385,7 @@ func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricS
 	w.Header().Set(contentTypeHeader, htmlContentType)
 
 	// Fetch paginated results from storage, filtered by project
-	results, totalCount, err := rubricServer.storage.ListResultsPaginated(ctx, storage.ListResultsParams{
+	results, totalCount, err := h.storage.ListResultsPaginated(ctx, storage.ListResultsParams{
 		Page:     page,
 		PageSize: pageSize,
 		Project:  project,
@@ -484,7 +429,7 @@ func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricS
 	if r.Header.Get("HX-Request") == "true" {
 		// Return only table content for HTMX
 		w.Header().Set(contentTypeHeader, htmlContentType)
-		if err := executeTableContent(w, &data, rubricServer); err != nil {
+		if err := executeTableContent(w, &data, h); err != nil {
 			contextlog.From(ctx).ErrorContext(ctx, templateExecErrMsg, slog.Any("error", err))
 			http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
 			return
@@ -493,7 +438,7 @@ func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricS
 	}
 
 	// Execute full template for initial page load
-	if err := rubricServer.templates.submissionsTmpl.Execute(w, data); err != nil {
+	if err := h.templates.submissionsTmpl.Execute(w, data); err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, templateExecErrMsg, slog.Any("error", err))
 		http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
 		return
@@ -501,12 +446,12 @@ func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricS
 }
 
 // serveSubmissionDetailPage serves the HTML page for a specific submission's details
-func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project, submissionID string) {
+func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, project, submissionID string, h *HTMLHandler) {
 	// Set content type
 	w.Header().Set(contentTypeHeader, htmlContentType)
 
 	ctx := r.Context()
-	result, err := rubricServer.storage.LoadResult(ctx, submissionID)
+	result, err := h.storage.LoadResult(ctx, submissionID)
 	if err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, "Failed to load result from storage",
 			slog.Any("error", err),
@@ -581,111 +526,11 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricSer
 		Rubric:        rubricItems,
 	}
 
-	if err := rubricServer.templates.submissionTmpl.Execute(w, data); err != nil {
+	if err := h.templates.submissionTmpl.Execute(w, data); err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, templateExecErrMsg, slog.Any("error", err))
 		http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
 		return
 	}
-}
-
-// AuthRubricHandler returns an HTTP handler that wraps the given handler with selective authentication.
-// It requires authentication (Bearer token) for POST, PUT, and DELETE requests,
-// while allowing GET and HEAD requests without authentication for public submissions viewing.
-// Returns 401 Unauthorized if required authentication is missing or invalid.
-func AuthRubricHandler(handler http.Handler, token string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Check if this is a method that requires authentication
-		if requiresAuth(r) {
-			// Apply authentication
-			t := time.Now()
-			defer func() {
-				duration := time.Since(t)
-				ctx := r.Context()
-				contextlog.From(ctx).InfoContext(
-					ctx,
-					"Request completed",
-					slog.String("IP", r.RemoteAddr),
-					slog.Duration("duration", duration),
-				)
-			}()
-			authHeader := r.Header.Get("authorization")
-			if authHeader == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
-				return
-			}
-			const bearerPrefix = "Bearer "
-			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
-				return
-			}
-			bearer := authHeader[len(bearerPrefix):]
-			if bearer != token {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-		}
-		// No auth required, or auth passed - proceed
-		handler.ServeHTTP(w, r)
-	})
-}
-
-// AuthMiddleware returns a middleware function that validates Bearer token authentication.
-// It verifies the Authorization header contains a valid "Bearer {token}" before allowing the request through.
-// Returns 401 Unauthorized if the token is missing or invalid.
-func AuthMiddleware(token string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			t := time.Now()
-			defer func() {
-				duration := time.Since(t)
-				contextlog.From(r.Context()).InfoContext(r.Context(), "Request completed",
-					slog.String("IP", r.RemoteAddr),
-					slog.Duration("duration", duration),
-				)
-			}()
-			authHeader := r.Header.Get("authorization")
-			if authHeader == "" {
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
-				return
-			}
-			const bearerPrefix = "Bearer "
-			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
-				return
-			}
-			bearer := authHeader[len(bearerPrefix):]
-			if bearer != token {
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// Context key for real IP
-type contextKey string
-
-const realIPKey contextKey = "real-ip"
-
-// realIPMiddleware extracts the real client IP and stores it in request context
-func realIPMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract real IP using tomasen/realip
-		realIP := realip.RealIP(r)
-
-		// Store the real IP in the request context
-		ctx := context.WithValue(r.Context(), realIPKey, realIP)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// requiresAuth determines if the current request requires authentication
-func requiresAuth(r *http.Request) bool {
-	// Only UploadRubricResult requires authentication
-	return r.URL.Path == "/rubric.RubricService/UploadRubricResult"
 }
 
 // EvaluateCodeQuality handles RPC requests to evaluate code quality using AI.
