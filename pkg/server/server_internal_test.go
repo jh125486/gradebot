@@ -262,7 +262,7 @@ func TestGetClientIP(t *testing.T) {
 			// Create base context - use t.Context() or context.Background() for test setup
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			if tt.name == "RealIPFromContext" {
-				ctx = context.WithValue(ctx, realIPKey, "192.168.1.100")
+				ctx = context.WithValue(ctx, RealIPKey, "192.168.1.100")
 			}
 
 			// Create a mock request
@@ -346,8 +346,8 @@ func TestRealIPMiddleware(t *testing.T) {
 			t.Parallel()
 
 			// Create a test handler that checks the context
-			handler := realIPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				realIP := r.Context().Value(realIPKey)
+			handler := RealIPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				realIP := r.Context().Value(RealIPKey)
 				assert.Equal(t, tt.expectedRealIP, realIP)
 				w.WriteHeader(http.StatusOK)
 			}))
@@ -358,46 +358,7 @@ func TestRealIPMiddleware(t *testing.T) {
 
 			handler.ServeHTTP(rr, req)
 			assert.Equal(t, http.StatusOK, rr.Code)
-		})
-	}
-}
-
-func TestRequiresAuth(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name     string
-		path     string
-		expected bool
-	}{
-		{
-			name:     "UploadRubricResultRequiresAuth",
-			path:     testUploadPath,
-			expected: true,
-		},
-		{
-			name:     "OtherPathsDontRequireAuth",
-			path:     testSubmissionsPath,
-			expected: false,
-		},
-		{
-			name:     "RootPath",
-			path:     "/",
-			expected: false,
-		},
-		{
-			name:     "SubmissionsDetail",
-			path:     testSubmissionsPath + "/123",
-			expected: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
-			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, http.NoBody)
-			result := requiresAuth(req)
-			assert.Equal(t, tt.expected, result)
+			assert.Equal(t, http.StatusOK, rr.Code)
 		})
 	}
 }
@@ -1341,61 +1302,6 @@ func TestHandleProjectRoutesEmptyPath(t *testing.T) {
 	}
 }
 
-func TestAuthRubricHandlerNoAuth(t *testing.T) {
-	tests := []struct {
-		name               string
-		method             string
-		path               string
-		requiresAuth       bool
-		expectedStatusCode int
-	}{
-		{
-			name:               "GET request no auth required",
-			method:             http.MethodGet,
-			path:               "/some/path",
-			requiresAuth:       false,
-			expectedStatusCode: http.StatusOK,
-		},
-		{
-			name:               "POST with valid auth",
-			method:             http.MethodPost,
-			path:               testUploadPath,
-			requiresAuth:       true,
-			expectedStatusCode: http.StatusOK,
-		},
-		{
-			name:               "POST without auth",
-			method:             http.MethodPost,
-			path:               testUploadPath,
-			requiresAuth:       true,
-			expectedStatusCode: http.StatusUnauthorized,
-		},
-	}
-
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("success"))
-	})
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			authHandler := AuthRubricHandler(handler, testToken)
-
-			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
-			if tt.name == "POST with valid auth" {
-				req.Header.Set("authorization", testTokenBearer)
-			}
-
-			w := httptest.NewRecorder()
-			authHandler.ServeHTTP(w, req)
-
-			resp := w.Result()
-			defer resp.Body.Close()
-			assert.Equal(t, tt.expectedStatusCode, resp.StatusCode)
-		})
-	}
-}
-
 // mockStorageWithError is a mock storage that can return errors
 type mockStorageWithError struct {
 	listProjectsError error
@@ -1431,26 +1337,4 @@ func (m *mockStorageWithError) ListProjects(ctx context.Context) ([]string, erro
 
 func (m *mockStorageWithError) Close() error {
 	return nil
-}
-
-// Helper functions to expose internal functions for black-box testing
-
-// ExposedMaskToken exposes maskToken for testing
-func ExposedMaskToken(token string) string {
-	return maskToken(token)
-}
-
-// ExposedServeIndexPage exposes serveIndexPage for testing
-func ExposedServeIndexPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
-	serveIndexPage(w, r, rubricServer)
-}
-
-// ExposedServeProjectSubmissionsPage exposes serveProjectSubmissionsPage for testing
-func ExposedServeProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project string) {
-	serveProjectSubmissionsPage(w, r, rubricServer, project)
-}
-
-// ExposedServeSubmissionDetailPage exposes serveSubmissionDetailPage for testing
-func ExposedServeSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project, submissionID string) {
-	serveSubmissionDetailPage(w, r, rubricServer, project, submissionID)
 }

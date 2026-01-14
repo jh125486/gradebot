@@ -56,16 +56,10 @@ func (cmd *CLI) AfterApply(ctx cli.Context) error {
 
 // Run executes the server command.
 func (cmd *CLI) Run(ctx cli.Context, buildID cli.BuildID) error {
-	port := cmd.Port
-	if port == "" {
-		port = "8080"
-	}
-
-	cfg := server.Config{
+	return server.Start(ctx, server.Config{
 		ID:           string(buildID),
-		Port:         port,
+		Port:         cmd.Port,
 		OpenAIClient: cmd.OpenAIClient,
 		Storage:      cmd.Storage,
-	}
-	return server.Start(ctx, cfg)
+	})
 }

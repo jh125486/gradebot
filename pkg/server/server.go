@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"crypto/subtle"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -17,7 +16,6 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"github.com/tomasen/realip"
 
 	"github.com/jh125486/gradebot/pkg/contextlog"
 	"github.com/jh125486/gradebot/pkg/openai"
@@ -39,6 +37,7 @@ const (
 	xForwardedForHeader  = "X-Forwarded-For"
 	xRealIPHeader        = "X-Real-IP"
 	cfConnectingIPHeader = "CF-Connecting-IP"
+	requestIDHeader      = "X-Request-ID"
 )
 
 var (
@@ -55,7 +54,7 @@ type IPExtractable interface {
 // extractClientIP extracts client IP from any object that implements IPExtractable
 func extractClientIP(ctx context.Context, req IPExtractable) string {
 	// Method 1: Try to get from context (set by realIP middleware)
-	if realIP, ok := ctx.Value(realIPKey).(string); ok && realIP != "" && realIP != unknownIP {
+	if realIP, ok := ctx.Value(RealIPKey).(string); ok && realIP != "" && realIP != unknownIP {
 		return realIP
 	}
 
@@ -250,12 +249,12 @@ func Start(ctx context.Context, cfg Config) error {
 	// Create a multiplexer to handle both services
 	mux := http.NewServeMux()
 
-	// Wrap handlers with realip middleware to extract real client IPs
-	mux.Handle(qualityPath, realIPMiddleware(AuthMiddleware(cfg.ID)(qualityHandler)))
-	mux.Handle(rubricPath, realIPMiddleware(AuthMiddleware(cfg.ID)(rubricHandler)))
+	// Wrap handlers with middleware: requestID -> logging -> realIP -> auth
+	mux.Handle(qualityPath, RequestIDMiddleware(LoggingMiddleware(RealIPMiddleware(AuthMiddleware(cfg.ID)(qualityHandler)))))
+	mux.Handle(rubricPath, RequestIDMiddleware(LoggingMiddleware(RealIPMiddleware(AuthMiddleware(cfg.ID)(rubricHandler)))))
 
 	// Serve index page with list of all projects (no auth required)
-	mux.Handle("/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	mux.Handle("/", RequestIDMiddleware(LoggingMiddleware(RealIPMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Only handle exact root path
 		if r.URL.Path == "/" {
 			serveIndexPage(w, r, rubricServer)
@@ -264,15 +263,14 @@ func Start(ctx context.Context, cfg Config) error {
 
 		// Try to handle as project submissions page or submission detail
 		handleProjectRoutes(w, r, rubricServer)
-	}))
+	})))))
 
 	// Health check endpoint for Koyeb and monitoring
-	mux.Handle("/health", http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	mux.Handle("/health", RequestIDMiddleware(LoggingMiddleware(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set(contentTypeHeader, "application/json")
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(`{"status":"healthy","timestamp":"` + time.Now().Format(time.RFC3339) + `"}`))
-	}))
-
+	}))))
 	srv := &http.Server{
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
@@ -587,193 +585,6 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricSer
 		http.Error(w, templateExecErrMsg, http.StatusInternalServerError)
 		return
 	}
-}
-
-// maskToken masks a token for safe logging by showing only the first and last few characters.
-// It handles empty tokens, Bearer prefix extraction, and short tokens gracefully.
-func maskToken(token string) string {
-	if token == "" {
-		return "<empty>"
-	}
-	// Remove Bearer prefix for display if present
-	if strings.HasPrefix(token, "Bearer ") {
-		return "Bearer " + maskTokenValue(token[7:])
-	}
-
-	return maskTokenValue(token)
-}
-
-// maskTokenValue masks the actual token value showing first 4 and last 4 characters
-func maskTokenValue(token string) string {
-	if token == "" {
-		return "<empty>"
-	}
-	if len(token) <= 8 {
-		return strings.Repeat("*", len(token))
-	}
-	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
-}
-
-// AuthRubricHandler returns an HTTP handler that wraps the given handler with selective authentication.
-// It requires authentication (Bearer token) for POST, PUT, and DELETE requests,
-// while allowing GET and HEAD requests without authentication for public submissions viewing.
-// Returns 401 Unauthorized if required authentication is missing or invalid.
-func AuthRubricHandler(handler http.Handler, token string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ctx := r.Context()
-		logger := contextlog.From(ctx)
-
-		// Log incoming request details
-		logger.DebugContext(ctx, "AuthRubricHandler: incoming request",
-			slog.String("method", r.Method),
-			slog.String("path", r.URL.Path),
-			slog.String("remote_addr", r.RemoteAddr),
-			slog.Bool("requires_auth", requiresAuth(r)),
-		)
-
-		// Check if this is a method that requires authentication
-		if requiresAuth(r) {
-			// Apply authentication
-			t := time.Now()
-			defer func() {
-				duration := time.Since(t)
-				logger.InfoContext(
-					ctx,
-					"Request completed",
-					slog.String("IP", r.RemoteAddr),
-					slog.Duration("duration", duration),
-				)
-			}()
-			authHeader := r.Header.Get("authorization")
-			logger.DebugContext(ctx, "AuthRubricHandler: checking authorization",
-				slog.Bool("has_auth_header", authHeader != ""),
-				slog.Int("auth_header_len", len(authHeader)),
-				slog.String("auth_header_preview", maskToken(authHeader)),
-				slog.String("expected_token_preview", maskToken("Bearer "+token)),
-			)
-			if authHeader == "" {
-				logger.WarnContext(ctx, "AuthRubricHandler: 401 - missing authorization header",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-				)
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
-				return
-			}
-			const bearerPrefix = "Bearer "
-			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid authorization header format",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-				)
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
-				return
-			}
-			bearer := authHeader[len(bearerPrefix):]
-			if subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
-				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid token",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-					slog.Int("provided_token_len", len(bearer)),
-					slog.Int("expected_token_len", len(token)),
-				)
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-			logger.DebugContext(ctx, "AuthRubricHandler: authentication successful")
-		}
-		// No auth required, or auth passed - proceed
-		handler.ServeHTTP(w, r)
-	})
-}
-
-// AuthMiddleware returns a middleware function that validates Bearer token authentication.
-// It verifies the Authorization header contains a valid "Bearer {token}" before allowing the request through.
-// Returns 401 Unauthorized if the token is missing or invalid.
-func AuthMiddleware(token string) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx := r.Context()
-			logger := contextlog.From(ctx)
-			t := time.Now()
-			defer func() {
-				duration := time.Since(t)
-				logger.InfoContext(ctx, "Request completed",
-					slog.String("IP", r.RemoteAddr),
-					slog.Duration("duration", duration),
-				)
-			}()
-
-			// Log incoming request details
-			logger.DebugContext(ctx, "AuthMiddleware: incoming request",
-				slog.String("method", r.Method),
-				slog.String("path", r.URL.Path),
-				slog.String("remote_addr", r.RemoteAddr),
-			)
-
-			authHeader := r.Header.Get("authorization")
-			logger.DebugContext(ctx, "AuthMiddleware: checking authorization",
-				slog.Bool("has_auth_header", authHeader != ""),
-				slog.Int("auth_header_len", len(authHeader)),
-				slog.String("auth_header_preview", maskToken(authHeader)),
-				slog.String("expected_token_preview", maskToken("Bearer "+token)),
-			)
-			if authHeader == "" {
-				logger.WarnContext(ctx, "AuthMiddleware: 401 - missing authorization header",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-				)
-				http.Error(w, "missing authorization header", http.StatusUnauthorized)
-				return
-			}
-			const bearerPrefix = "Bearer "
-			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
-				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid authorization header format",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-				)
-				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
-				return
-			}
-			bearer := authHeader[len(bearerPrefix):]
-			if subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
-				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid token",
-					slog.String("method", r.Method),
-					slog.String("path", r.URL.Path),
-					slog.Int("provided_token_len", len(bearer)),
-					slog.Int("expected_token_len", len(token)),
-				)
-				http.Error(w, "invalid token", http.StatusUnauthorized)
-				return
-			}
-			logger.DebugContext(ctx, "AuthMiddleware: authentication successful")
-			next.ServeHTTP(w, r)
-		})
-	}
-}
-
-// Context key for real IP
-type contextKey string
-
-const realIPKey contextKey = "real-ip"
-
-// realIPMiddleware extracts the real client IP and stores it in request context
-func realIPMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Extract real IP using tomasen/realip
-		realIP := realip.RealIP(r)
-
-		// Store the real IP in the request context
-		ctx := context.WithValue(r.Context(), realIPKey, realIP)
-		r = r.WithContext(ctx)
-
-		next.ServeHTTP(w, r)
-	})
-}
-
-// requiresAuth determines if the current request requires authentication
-func requiresAuth(r *http.Request) bool {
-	// Only UploadRubricResult requires authentication
-	return r.URL.Path == "/rubric.RubricService/UploadRubricResult"
 }
 
 // EvaluateCodeQuality handles RPC requests to evaluate code quality using AI.
