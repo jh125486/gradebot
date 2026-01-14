@@ -40,7 +40,13 @@ func main() {
 func newLogger(ctx context.Context) context.Context {
 	var logLevel slog.Level
 	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
-		_ = logLevel.UnmarshalText([]byte(lvl))
+		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
+			slog.Default().WarnContext(ctx, "Invalid LOG_LEVEL, falling back to INFO",
+				slog.String("LOG_LEVEL", lvl),
+				slog.Any("error", err),
+			)
+			logLevel = slog.LevelInfo
+		}
 	}
 	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel,

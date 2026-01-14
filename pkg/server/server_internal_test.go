@@ -1432,3 +1432,25 @@ func (m *mockStorageWithError) ListProjects(ctx context.Context) ([]string, erro
 func (m *mockStorageWithError) Close() error {
 	return nil
 }
+
+// Helper functions to expose internal functions for black-box testing
+
+// ExposedMaskToken exposes maskToken for testing
+func ExposedMaskToken(token string) string {
+	return maskToken(token)
+}
+
+// ExposedServeIndexPage exposes serveIndexPage for testing
+func ExposedServeIndexPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer) {
+	serveIndexPage(w, r, rubricServer)
+}
+
+// ExposedServeProjectSubmissionsPage exposes serveProjectSubmissionsPage for testing
+func ExposedServeProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project string) {
+	serveProjectSubmissionsPage(w, r, rubricServer, project)
+}
+
+// ExposedServeSubmissionDetailPage exposes serveSubmissionDetailPage for testing
+func ExposedServeSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricServer *RubricServer, project, submissionID string) {
+	serveSubmissionDetailPage(w, r, rubricServer, project, submissionID)
+}

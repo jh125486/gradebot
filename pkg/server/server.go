@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"embed"
 	"fmt"
@@ -663,19 +664,17 @@ func AuthRubricHandler(handler http.Handler, token string) http.Handler {
 				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid authorization header format",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
-					slog.Bool("has_bearer_prefix", len(authHeader) >= len(bearerPrefix) && authHeader[:len(bearerPrefix)] == bearerPrefix),
 				)
 				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 				return
 			}
 			bearer := authHeader[len(bearerPrefix):]
-			if bearer != token {
+			if subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
 				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid token",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
 					slog.Int("provided_token_len", len(bearer)),
 					slog.Int("expected_token_len", len(token)),
-					slog.Bool("tokens_match", bearer == token),
 				)
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
@@ -731,19 +730,17 @@ func AuthMiddleware(token string) func(http.Handler) http.Handler {
 				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid authorization header format",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
-					slog.Bool("has_bearer_prefix", len(authHeader) >= len(bearerPrefix) && authHeader[:len(bearerPrefix)] == bearerPrefix),
 				)
 				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 				return
 			}
 			bearer := authHeader[len(bearerPrefix):]
-			if bearer != token {
+			if subtle.ConstantTimeCompare([]byte(bearer), []byte(token)) != 1 {
 				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid token",
 					slog.String("method", r.Method),
 					slog.String("path", r.URL.Path),
 					slog.Int("provided_token_len", len(bearer)),
 					slog.Int("expected_token_len", len(token)),
-					slog.Bool("tokens_match", bearer == token),
 				)
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
