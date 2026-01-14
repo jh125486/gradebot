@@ -46,6 +46,14 @@ func (r *Result) Render(w io.Writer) {
 			Alignment: tw.CellAlignment{
 				PerColumn: []tw.Align{tw.AlignLeft, tw.AlignRight, tw.AlignRight, tw.AlignLeft},
 			},
+			ColMaxWidths: tw.CellWidth{
+				PerColumn: tw.Mapper[int, int]{
+					0: 40, // Name
+					1: 10, // Points
+					2: 10, // Awarded
+					3: 60, // Notes
+				},
+			},
 		},
 	}))
 	table.Header("Name", "Points", "Awarded", "Notes")

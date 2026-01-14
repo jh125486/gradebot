@@ -1,9 +1,6 @@
 package app
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
-
 	"github.com/jh125486/gradebot/pkg/cli"
 	"github.com/jh125486/gradebot/pkg/openai"
 	"github.com/jh125486/gradebot/pkg/server"
@@ -58,15 +55,14 @@ func (cmd *CLI) AfterApply(ctx cli.Context) error {
 }
 
 // Run executes the server command.
-func (cmd *CLI) Run(ctx cli.Context, buildID string) error {
+func (cmd *CLI) Run(ctx cli.Context, buildID cli.BuildID) error {
 	port := cmd.Port
 	if port == "" {
 		port = "8080"
 	}
 
-	hashBytes := sha256.Sum256([]byte(buildID))
 	cfg := server.Config{
-		ID:           hex.EncodeToString(hashBytes[:]),
+		ID:           string(buildID),
 		Port:         port,
 		OpenAIClient: cmd.OpenAIClient,
 		Storage:      cmd.Storage,

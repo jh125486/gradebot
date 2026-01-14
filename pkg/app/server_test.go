@@ -18,6 +18,8 @@ func TestServerCmd_AfterApply(t *testing.T) {
 	// Cannot run subtests in parallel - they share the same PostgreSQL database
 	// and create the same schema, causing "duplicate key value violates unique constraint" errors
 
+	databaseURL := os.Getenv("DATABASE_URL")
+
 	type args struct {
 		databaseURL    string
 		r2Endpoint     string
@@ -29,18 +31,20 @@ func TestServerCmd_AfterApply(t *testing.T) {
 		openAIAPIKey   string
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
-		setup   func(t *testing.T)
-		verify  func(t *testing.T, cmd *app.CLI)
+		name       string
+		args       args
+		wantErr    bool
+		setup      func(t *testing.T)
+		verify     func(t *testing.T, cmd *app.CLI)
+		requiresDB bool
 	}{
 		{
 			name: "sql_storage_with_valid_connection",
 			args: args{
-				databaseURL: os.Getenv("DATABASE_URL"),
+				databaseURL: databaseURL,
 			},
-			wantErr: false,
+			wantErr:    false,
+			requiresDB: true,
 			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.Nil(t, cmd.OpenAIClient)
@@ -49,10 +53,11 @@ func TestServerCmd_AfterApply(t *testing.T) {
 		{
 			name: "sql_storage_with_openai_key",
 			args: args{
-				databaseURL:  os.Getenv("DATABASE_URL"),
+				databaseURL:  databaseURL,
 				openAIAPIKey: "sk-test-key-12345",
 			},
-			wantErr: false,
+			wantErr:    false,
+			requiresDB: true,
 			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.NotNil(t, cmd.OpenAIClient)
@@ -115,10 +120,11 @@ func TestServerCmd_AfterApply(t *testing.T) {
 		{
 			name: "empty_openai_key_does_not_initialize_client",
 			args: args{
-				databaseURL:  os.Getenv("DATABASE_URL"),
+				databaseURL:  databaseURL,
 				openAIAPIKey: "",
 			},
-			wantErr: false,
+			wantErr:    false,
+			requiresDB: true,
 			verify: func(t *testing.T, cmd *app.CLI) {
 				assert.NotNil(t, cmd.Storage)
 				assert.Nil(t, cmd.OpenAIClient)
@@ -129,6 +135,10 @@ func TestServerCmd_AfterApply(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Cannot run in parallel - tests share same database
+			if tt.requiresDB && databaseURL == "" {
+				t.Skip("DATABASE_URL not set, skipping test that requires database")
+			}
+
 			if tt.setup != nil {
 				tt.setup(t)
 			}
@@ -210,7 +220,7 @@ func TestServerCmd_Run(t *testing.T) {
 			cmd, ctx, cancel := tt.setup(t)
 			defer cancel()
 
-			buildID := "test-build-id-12345"
+			buildID := cli.BuildID("test-build-id-12345")
 			appCtx := cli.Context{Context: ctx}
 
 			err := cmd.Run(appCtx, buildID)

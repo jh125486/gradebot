@@ -2,7 +2,7 @@ package cli_test
 
 import (
 	"context"
-	"encoding/hex"
+	"io"
 	"testing"
 
 	"github.com/alecthomas/kong"
@@ -18,10 +18,10 @@ func TestNewKongContext(t *testing.T) {
 	t.Parallel()
 
 	type args struct {
-		ctx  context.Context
-		name string
-		id   [32]byte
-		cli  any
+		ctx     context.Context
+		name    string
+		buildID string
+		cli     any
 	}
 	tests := []struct {
 		name string
@@ -30,9 +30,9 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "creates_context_with_name",
 			args: args{
-				ctx:  context.Background(),
-				name: "test-app",
-				id:   [32]byte{1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32},
+				ctx:     context.TODO(),
+				name:    "test-app",
+				buildID: "some-build-id",
 				cli: &struct {
 					Help bool `help:"Show help"`
 				}{},
@@ -41,9 +41,9 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "binds_context_and_buildid",
 			args: args{
-				ctx:  context.WithValue(context.Background(), contextKey("test-key"), "test-value"),
-				name: "gradebot",
-				id:   [32]byte{0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF},
+				ctx:     context.WithValue(context.TODO(), contextKey("test-key"), "test-value"),
+				name:    "gradebot",
+				buildID: "v1.2.3",
 				cli: &struct {
 					Version bool `help:"Show version"`
 				}{},
@@ -52,28 +52,28 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "empty_name",
 			args: args{
-				ctx:  context.Background(),
-				name: "",
-				id:   [32]byte{},
-				cli:  &struct{}{},
+				ctx:     context.TODO(),
+				name:    "",
+				buildID: "",
+				cli:     &struct{}{},
 			},
 		},
 		{
-			name: "hex_encodes_build_id",
+			name: "hashes_build_id_internally",
 			args: args{
-				ctx:  context.Background(),
-				name: "test",
-				id:   [32]byte{0xFF, 0xAA, 0x55},
-				cli:  &struct{}{},
+				ctx:     context.TODO(),
+				name:    "test",
+				buildID: "my-build-id",
+				cli:     &struct{}{},
 			},
 		},
 		{
-			name: "zero_build_id",
+			name: "empty_build_id",
 			args: args{
-				ctx:  context.Background(),
-				name: "test",
-				id:   [32]byte{},
-				cli:  &struct{}{},
+				ctx:     context.TODO(),
+				name:    "test",
+				buildID: "",
+				cli:     &struct{}{},
 			},
 		},
 	}
@@ -83,14 +83,13 @@ func TestNewKongContext(t *testing.T) {
 			t.Parallel()
 
 			// Pass empty args to avoid parsing test flags from os.Args
-			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.id, tt.args.cli, []string{}, kong.Exit(func(int) {}))
+			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.buildID, tt.args.cli, []string{},
+				kong.Exit(func(int) {}),
+				kong.Writers(io.Discard, io.Discard),
+			)
 
 			require.NotNil(t, kctx, "Kong context should be created")
 			assert.NotNil(t, kctx.Model, "Model should be set")
-
-			// Verify hex encoding is correct
-			expectedHex := hex.EncodeToString(tt.args.id[:])
-			assert.Len(t, expectedHex, 64, "Build ID should be 64 hex characters")
 		})
 	}
 }
@@ -98,99 +97,73 @@ func TestNewKongContext(t *testing.T) {
 func TestNewKongContext_ErrorPaths(t *testing.T) {
 	t.Parallel()
 
-	t.Run("kong_new_errors", func(t *testing.T) {
-		t.Parallel()
+	type cliWithRequired struct {
+		Required string `help:"Required argument" required:""`
+	}
 
-		tests := []struct {
-			name      string
-			cli       any
-			wantPanic bool
-		}{
-			{
-				name:      "invalid_cli_type_causes_panic",
-				cli:       "not a struct pointer",
-				wantPanic: true,
-			},
-			{
-				name:      "nil_cli_causes_panic",
-				cli:       nil,
-				wantPanic: true,
-			},
-			{
-				name:      "valid_cli_no_panic",
-				cli:       &struct{}{},
-				wantPanic: false,
-			},
-		}
+	type args struct {
+		cli  any
+		args []string
+	}
+	tests := []struct {
+		name      string
+		args      args
+		wantPanic bool
+	}{
+		{
+			name:      "invalid_cli_type_causes_panic",
+			args:      args{cli: "not a struct pointer", args: []string{}},
+			wantPanic: true,
+		},
+		{
+			name:      "nil_cli_causes_panic",
+			args:      args{cli: nil, args: []string{}},
+			wantPanic: true,
+		},
+		{
+			name:      "valid_cli_no_panic",
+			args:      args{cli: &struct{}{}, args: []string{}},
+			wantPanic: false,
+		},
+		{
+			name:      "missing_required_arg",
+			args:      args{cli: &cliWithRequired{}, args: []string{}},
+			wantPanic: true,
+		},
+		{
+			name:      "unknown_flag",
+			args:      args{cli: &struct{}{}, args: []string{"--unknown-flag"}},
+			wantPanic: true,
+		},
+		{
+			name:      "valid_args_no_panic",
+			args:      args{cli: &cliWithRequired{}, args: []string{"--required", "value"}},
+			wantPanic: false,
+		},
+	}
 
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-				if tt.wantPanic {
-					assert.Panics(t, func() {
-						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{}, kong.Exit(func(int) {}))
-					})
-				} else {
-					assert.NotPanics(t, func() {
-						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, []string{}, kong.Exit(func(int) {}))
-						assert.NotNil(t, kctx)
-					})
-				}
-			})
-		}
-	})
-
-	t.Run("parse_errors", func(t *testing.T) {
-		t.Parallel()
-
-		type cliWithRequired struct {
-			Required string `help:"Required argument" required:""`
-		}
-
-		tests := []struct {
-			name      string
-			cli       any
-			args      []string
-			wantPanic bool
-		}{
-			{
-				name:      "missing_required_arg",
-				cli:       &cliWithRequired{},
-				args:      []string{}, // Missing required argument
-				wantPanic: true,
-			},
-			{
-				name:      "unknown_flag",
-				cli:       &struct{}{},
-				args:      []string{"--unknown-flag"},
-				wantPanic: true,
-			},
-			{
-				name:      "valid_args_no_panic",
-				cli:       &cliWithRequired{},
-				args:      []string{"--required", "value"},
-				wantPanic: false,
-			},
-		}
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				t.Parallel()
-
-				if tt.wantPanic {
-					assert.Panics(t, func() {
-						cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args, kong.Exit(func(int) {}))
-					})
-				} else {
-					assert.NotPanics(t, func() {
-						kctx := cli.NewKongContext(context.Background(), "test", [32]byte{}, tt.cli, tt.args, kong.Exit(func(int) {}))
-						assert.NotNil(t, kctx)
-					})
-				}
-			})
-		}
-	})
+			if tt.wantPanic {
+				assert.Panics(t, func() {
+					cli.NewKongContext(t.Context(), "test", "", tt.args.cli, tt.args.args,
+						kong.Exit(func(int) {}),
+						kong.Writers(io.Discard, io.Discard),
+					)
+				})
+			} else {
+				assert.NotPanics(t, func() {
+					kctx := cli.NewKongContext(t.Context(), "test", "", tt.args.cli, tt.args.args,
+						kong.Exit(func(int) {}),
+						kong.Writers(io.Discard, io.Discard),
+					)
+					assert.NotNil(t, kctx)
+				})
+			}
+		})
+	}
 }
 
 func TestContext_Wrapping(t *testing.T) {
@@ -202,15 +175,15 @@ func TestContext_Wrapping(t *testing.T) {
 		validate func(*testing.T, cli.Context)
 	}{
 		{
-			name: "wraps_background_context",
-			ctx:  context.Background(),
+			name: "wraps_todo_context",
+			ctx:  context.TODO(),
 			validate: func(t *testing.T, wrapped cli.Context) {
 				assert.NotNil(t, wrapped.Context)
 			},
 		},
 		{
 			name: "preserves_context_values",
-			ctx:  context.WithValue(context.Background(), contextKey("key"), "value"),
+			ctx:  context.WithValue(context.TODO(), contextKey("key"), "value"),
 			validate: func(t *testing.T, wrapped cli.Context) {
 				assert.Equal(t, "value", wrapped.Value(contextKey("key")))
 			},
@@ -218,7 +191,7 @@ func TestContext_Wrapping(t *testing.T) {
 		{
 			name: "preserves_cancellation",
 			ctx: func() context.Context {
-				ctx, cancel := context.WithCancel(context.Background())
+				ctx, cancel := context.WithCancel(context.TODO())
 				cancel()
 				return ctx
 			}(),

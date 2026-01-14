@@ -588,20 +588,55 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, rubricSer
 	}
 }
 
+// maskToken masks a token for safe logging by showing only the first and last few characters.
+// It handles empty tokens, Bearer prefix extraction, and short tokens gracefully.
+func maskToken(token string) string {
+	if token == "" {
+		return "<empty>"
+	}
+	// Remove Bearer prefix for display if present
+	if strings.HasPrefix(token, "Bearer ") {
+		return "Bearer " + maskTokenValue(token[7:])
+	}
+
+	return maskTokenValue(token)
+}
+
+// maskTokenValue masks the actual token value showing first 4 and last 4 characters
+func maskTokenValue(token string) string {
+	if token == "" {
+		return "<empty>"
+	}
+	if len(token) <= 8 {
+		return strings.Repeat("*", len(token))
+	}
+	return token[:4] + strings.Repeat("*", len(token)-8) + token[len(token)-4:]
+}
+
 // AuthRubricHandler returns an HTTP handler that wraps the given handler with selective authentication.
 // It requires authentication (Bearer token) for POST, PUT, and DELETE requests,
 // while allowing GET and HEAD requests without authentication for public submissions viewing.
 // Returns 401 Unauthorized if required authentication is missing or invalid.
 func AuthRubricHandler(handler http.Handler, token string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
+		logger := contextlog.From(ctx)
+
+		// Log incoming request details
+		logger.DebugContext(ctx, "AuthRubricHandler: incoming request",
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.String("remote_addr", r.RemoteAddr),
+			slog.Bool("requires_auth", requiresAuth(r)),
+		)
+
 		// Check if this is a method that requires authentication
 		if requiresAuth(r) {
 			// Apply authentication
 			t := time.Now()
 			defer func() {
 				duration := time.Since(t)
-				ctx := r.Context()
-				contextlog.From(ctx).InfoContext(
+				logger.InfoContext(
 					ctx,
 					"Request completed",
 					slog.String("IP", r.RemoteAddr),
@@ -609,20 +644,43 @@ func AuthRubricHandler(handler http.Handler, token string) http.Handler {
 				)
 			}()
 			authHeader := r.Header.Get("authorization")
+			logger.DebugContext(ctx, "AuthRubricHandler: checking authorization",
+				slog.Bool("has_auth_header", authHeader != ""),
+				slog.Int("auth_header_len", len(authHeader)),
+				slog.String("auth_header_preview", maskToken(authHeader)),
+				slog.String("expected_token_preview", maskToken("Bearer "+token)),
+			)
 			if authHeader == "" {
+				logger.WarnContext(ctx, "AuthRubricHandler: 401 - missing authorization header",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+				)
 				http.Error(w, "missing authorization header", http.StatusUnauthorized)
 				return
 			}
 			const bearerPrefix = "Bearer "
 			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
+				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid authorization header format",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Bool("has_bearer_prefix", len(authHeader) >= len(bearerPrefix) && authHeader[:len(bearerPrefix)] == bearerPrefix),
+				)
 				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 				return
 			}
 			bearer := authHeader[len(bearerPrefix):]
 			if bearer != token {
+				logger.WarnContext(ctx, "AuthRubricHandler: 401 - invalid token",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Int("provided_token_len", len(bearer)),
+					slog.Int("expected_token_len", len(token)),
+					slog.Bool("tokens_match", bearer == token),
+				)
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
+			logger.DebugContext(ctx, "AuthRubricHandler: authentication successful")
 		}
 		// No auth required, or auth passed - proceed
 		handler.ServeHTTP(w, r)
@@ -635,29 +693,62 @@ func AuthRubricHandler(handler http.Handler, token string) http.Handler {
 func AuthMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			logger := contextlog.From(ctx)
 			t := time.Now()
 			defer func() {
 				duration := time.Since(t)
-				contextlog.From(r.Context()).InfoContext(r.Context(), "Request completed",
+				logger.InfoContext(ctx, "Request completed",
 					slog.String("IP", r.RemoteAddr),
 					slog.Duration("duration", duration),
 				)
 			}()
+
+			// Log incoming request details
+			logger.DebugContext(ctx, "AuthMiddleware: incoming request",
+				slog.String("method", r.Method),
+				slog.String("path", r.URL.Path),
+				slog.String("remote_addr", r.RemoteAddr),
+			)
+
 			authHeader := r.Header.Get("authorization")
+			logger.DebugContext(ctx, "AuthMiddleware: checking authorization",
+				slog.Bool("has_auth_header", authHeader != ""),
+				slog.Int("auth_header_len", len(authHeader)),
+				slog.String("auth_header_preview", maskToken(authHeader)),
+				slog.String("expected_token_preview", maskToken("Bearer "+token)),
+			)
 			if authHeader == "" {
+				logger.WarnContext(ctx, "AuthMiddleware: 401 - missing authorization header",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+				)
 				http.Error(w, "missing authorization header", http.StatusUnauthorized)
 				return
 			}
 			const bearerPrefix = "Bearer "
 			if len(authHeader) < len(bearerPrefix) || authHeader[:len(bearerPrefix)] != bearerPrefix {
+				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid authorization header format",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Bool("has_bearer_prefix", len(authHeader) >= len(bearerPrefix) && authHeader[:len(bearerPrefix)] == bearerPrefix),
+				)
 				http.Error(w, "invalid authorization header format", http.StatusUnauthorized)
 				return
 			}
 			bearer := authHeader[len(bearerPrefix):]
 			if bearer != token {
+				logger.WarnContext(ctx, "AuthMiddleware: 401 - invalid token",
+					slog.String("method", r.Method),
+					slog.String("path", r.URL.Path),
+					slog.Int("provided_token_len", len(bearer)),
+					slog.Int("expected_token_len", len(token)),
+					slog.Bool("tokens_match", bearer == token),
+				)
 				http.Error(w, "invalid token", http.StatusUnauthorized)
 				return
 			}
+			logger.DebugContext(ctx, "AuthMiddleware: authentication successful")
 			next.ServeHTTP(w, r)
 		})
 	}

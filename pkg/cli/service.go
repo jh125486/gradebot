@@ -21,11 +21,11 @@ type Service struct {
 
 // NewService creates a new Service with default implementations.
 // buildID is used for the Authorization header in the HTTP client.
-func NewService(buildID string) *Service {
+func NewService(id string) *Service {
 	return &Service{
 		Client: &http.Client{
 			Timeout:   30 * time.Second,
-			Transport: client.NewAuthTransport(buildID, http.DefaultTransport),
+			Transport: client.NewAuthTransport(id, http.DefaultTransport),
 		},
 		Stdin:  os.Stdin,
 		Stdout: os.Stdout,

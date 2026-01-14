@@ -136,7 +136,7 @@ Every file is below, delimited by triple backticks and a language tag if applica
 			},
 			Temperature:     openai.Float(0.0),
 			TopP:            openai.Float(1.0),
-			MaxOutputTokens: openai.Int(128),
+			MaxOutputTokens: openai.Int(512),
 			Text: responses.ResponseTextConfigParam{
 				Format: responses.ResponseFormatTextConfigUnionParam{
 					OfJSONSchema: &responses.ResponseFormatTextJSONSchemaConfigParam{
