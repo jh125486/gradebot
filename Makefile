@@ -32,7 +32,7 @@ build:
 ## test: Run all tests with coverage
 test:
 	@echo "Running tests..."
-	@go test -timeout 30s -race -coverprofile=coverage.out ./...
+	@go test -timeout 30s -shuffle=on -race -cover -coverprofile=coverage.out ./...
 
 tidy:
 	@echo "Tidying Go modules..."

@@ -30,7 +30,7 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "creates_context_with_name",
 			args: args{
-				ctx:     context.TODO(),
+				ctx:     t.Context(),
 				name:    "test-app",
 				buildID: "some-build-id",
 				cli: &struct {
@@ -41,7 +41,7 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "binds_context_and_buildid",
 			args: args{
-				ctx:     context.WithValue(context.TODO(), contextKey("test-key"), "test-value"),
+				ctx:     context.WithValue(t.Context(), contextKey("test-key"), "test-value"),
 				name:    "gradebot",
 				buildID: "v1.2.3",
 				cli: &struct {
@@ -52,7 +52,7 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "empty_name",
 			args: args{
-				ctx:     context.TODO(),
+				ctx:     t.Context(),
 				name:    "",
 				buildID: "",
 				cli:     &struct{}{},
@@ -61,7 +61,7 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "hashes_build_id_internally",
 			args: args{
-				ctx:     context.TODO(),
+				ctx:     t.Context(),
 				name:    "test",
 				buildID: "my-build-id",
 				cli:     &struct{}{},
@@ -70,7 +70,7 @@ func TestNewKongContext(t *testing.T) {
 		{
 			name: "empty_build_id",
 			args: args{
-				ctx:     context.TODO(),
+				ctx:     t.Context(),
 				name:    "test",
 				buildID: "",
 				cli:     &struct{}{},
@@ -176,14 +176,14 @@ func TestContext_Wrapping(t *testing.T) {
 	}{
 		{
 			name: "wraps_todo_context",
-			ctx:  context.TODO(),
+			ctx:  t.Context(),
 			validate: func(t *testing.T, wrapped cli.Context) {
 				assert.NotNil(t, wrapped.Context)
 			},
 		},
 		{
 			name: "preserves_context_values",
-			ctx:  context.WithValue(context.TODO(), contextKey("key"), "value"),
+			ctx:  context.WithValue(t.Context(), contextKey("key"), "value"),
 			validate: func(t *testing.T, wrapped cli.Context) {
 				assert.Equal(t, "value", wrapped.Value(contextKey("key")))
 			},
@@ -191,7 +191,7 @@ func TestContext_Wrapping(t *testing.T) {
 		{
 			name: "preserves_cancellation",
 			ctx: func() context.Context {
-				ctx, cancel := context.WithCancel(context.TODO())
+				ctx, cancel := context.WithCancel(t.Context())
 				cancel()
 				return ctx
 			}(),

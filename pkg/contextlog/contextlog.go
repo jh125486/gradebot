@@ -4,9 +4,31 @@ package contextlog
 import (
 	"context"
 	"log/slog"
+	"os"
 )
 
 type loggerKey struct{}
+
+const DefaultLevel = slog.LevelInfo
+
+func New(ctx context.Context, rawLevel string) context.Context {
+	var logLevel slog.Level
+	if err := logLevel.UnmarshalText([]byte(rawLevel)); err != nil {
+		slog.Default().WarnContext(ctx, "Invalid level, falling back to default",
+			slog.String("rawLevel", rawLevel),
+			slog.String("default", DefaultLevel.String()),
+			slog.Any("error", err),
+		)
+		logLevel = DefaultLevel
+	}
+
+	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
+		Level: logLevel,
+	}))
+	slog.SetDefault(l)
+
+	return With(ctx, l)
+}
 
 // With returns a new context with the given logger attached.
 func With(ctx context.Context, logger *slog.Logger) context.Context {

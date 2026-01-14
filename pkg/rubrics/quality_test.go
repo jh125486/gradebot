@@ -448,7 +448,7 @@ func TestEvaluateQuality(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			evaluator := rubrics.EvaluateQuality(tt.mockClient, tt.sourceFS, tt.instructions)
-			result := evaluator(context.Background(), &mockProgramRunner{}, rubrics.RunBag{})
+			result := evaluator(t.Context(), &mockProgramRunner{}, rubrics.RunBag{})
 
 			if tt.expectedError != "" {
 				// For error cases, check that the note contains the error

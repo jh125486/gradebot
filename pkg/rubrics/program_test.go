@@ -1,7 +1,6 @@
 package rubrics_test
 
 import (
-	"context"
 	"errors"
 	"io"
 	"os"
@@ -834,7 +833,7 @@ func TestProgramDoIntegration(t *testing.T) {
 		t.Skip("skipping on windows")
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	// Use 'cat' which echoes stdin to stdout
 	runCmd := "cat"

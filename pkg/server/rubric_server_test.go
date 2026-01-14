@@ -1,7 +1,6 @@
 package server_test
 
 import (
-	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -155,7 +154,7 @@ func TestGeoLocationClientDo(t *testing.T) {
 			}
 
 			geoClient := &server.GeoLocationClient{Client: client}
-			ctx := contextlog.With(context.Background(), contextlog.DiscardLogger())
+			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			result := geoClient.Do(ctx, tt.ip)
 
 			assert.Equal(t, tt.expectedLocation, result)

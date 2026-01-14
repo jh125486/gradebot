@@ -12,6 +12,7 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/jh125486/gradebot/pkg/contextlog"
+	mw "github.com/jh125486/gradebot/pkg/middleware"
 	"github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/proto/protoconnect"
 	"github.com/jh125486/gradebot/pkg/storage"
@@ -21,15 +22,13 @@ import (
 type RubricServer struct {
 	protoconnect.UnimplementedRubricServiceHandler
 	storage   storage.Storage
-	templates *TemplateManager
 	geoClient *GeoLocationClient
 }
 
 // NewRubricServer creates a new RubricServer with persistent storage
 func NewRubricServer(stor storage.Storage) *RubricServer {
 	return &RubricServer{
-		storage:   stor,
-		templates: NewTemplateManager(),
+		storage: stor,
 		geoClient: &GeoLocationClient{
 			Client: &http.Client{},
 		},
@@ -47,7 +46,7 @@ func (s *RubricServer) UploadRubricResult(
 	}
 
 	// Capture client IP and geo location
-	clientIP := getClientIP(ctx, req)
+	clientIP := mw.ClientIP(ctx, req)
 	geoLocation := s.geoClient.Do(ctx, clientIP)
 
 	// Create a copy of the result with IP and geo data
@@ -82,23 +81,24 @@ func (s *RubricServer) UploadRubricResult(
 	}), nil
 }
 
-// getClientIP extracts the real client IP address from the request
-// Tries multiple methods to get the real IP
-func getClientIP(ctx context.Context, req *connect.Request[proto.UploadRubricResultRequest]) string {
-	return extractClientIP(ctx, req)
-}
+type (
+	// GeoLocation represents the geo location data from the IP lookup
+	GeoLocation struct {
+		City    string `json:"city"`
+		Region  string `json:"region"`
+		Country string `json:"country_name"`
+	}
 
-// GeoLocation represents the geo location data from the IP lookup
-type GeoLocation struct {
-	City    string `json:"city"`
-	Region  string `json:"region"`
-	Country string `json:"country_name"`
-}
+	// GeoLocationClient handles geo location lookups
+	GeoLocationClient struct {
+		*http.Client
+	}
+)
 
-// GeoLocationClient handles geo location lookups
-type GeoLocationClient struct {
-	*http.Client
-}
+const (
+	unknownLocation = "Unknown"
+	localUnknown    = "Local/Unknown"
+)
 
 // Do fetches geo location data for an IP address
 func (c *GeoLocationClient) Do(ctx context.Context, ip string) string {
@@ -145,7 +145,7 @@ func (c *GeoLocationClient) Do(ctx context.Context, ip string) string {
 }
 
 func skipGeoLookup(ip string) bool {
-	return ip == "" || ip == unknownIP || ip == "127.0.0.1" || ip == "::1"
+	return ip == "" || ip == mw.UnknownIP || ip == "127.0.0.1" || ip == "::1"
 }
 
 func newGeoRequest(ip string) (*http.Request, error) {

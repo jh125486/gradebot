@@ -10,8 +10,8 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/jh125486/gradebot/pkg/app"
-	"github.com/jh125486/gradebot/pkg/cli"
+	"github.com/jh125486/gradebot/cli"
+	basecli "github.com/jh125486/gradebot/pkg/cli"
 	"github.com/jh125486/gradebot/pkg/contextlog"
 )
 
@@ -22,12 +22,12 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	ctx = newLogger(ctx)
+	ctx = contextlog.New(ctx, os.Getenv("LOG_LEVEL"))
 
 	buildID := os.Getenv("BUILD_ID")
 	contextlog.From(ctx).InfoContext(ctx, "Starting gradebot application", slog.String("buildID", buildID))
-	var cliApp app.CLI
-	if err := cli.NewKongContext(ctx, "gradebot", buildID, &cliApp, os.Args[1:]).
+	var app cli.CLI
+	if err := basecli.NewKongContext(ctx, "gradebot", buildID, &app, os.Args[1:]).
 		Run(ctx); err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, "Failed to execute command", slog.Any("error", err))
 		os.Exit(1)
@@ -35,23 +35,4 @@ func main() {
 
 	// tiny grace period for logs to flush
 	time.Sleep(10 * time.Millisecond)
-}
-
-func newLogger(ctx context.Context) context.Context {
-	var logLevel slog.Level
-	if lvl := os.Getenv("LOG_LEVEL"); lvl != "" {
-		if err := logLevel.UnmarshalText([]byte(lvl)); err != nil {
-			slog.Default().WarnContext(ctx, "Invalid LOG_LEVEL, falling back to INFO",
-				slog.String("LOG_LEVEL", lvl),
-				slog.Any("error", err),
-			)
-			logLevel = slog.LevelInfo
-		}
-	}
-	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
-		Level: logLevel,
-	}))
-	slog.SetDefault(l)
-
-	return contextlog.With(ctx, l)
 }

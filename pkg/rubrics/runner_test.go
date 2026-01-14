@@ -32,7 +32,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 		{
 			name: "creates_commander_with_single_arg",
 			args: args{
-				ctx:  context.Background(),
+				ctx:  t.Context(),
 				name: "echo",
 				arg:  []string{"hello"},
 			},
@@ -40,7 +40,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 		{
 			name: "creates_commander_with_multiple_args",
 			args: args{
-				ctx:  context.Background(),
+				ctx:  t.Context(),
 				name: "echo",
 				arg:  []string{"hello", "world"},
 			},
@@ -48,7 +48,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 		{
 			name: "creates_commander_with_no_args",
 			args: args{
-				ctx:  context.Background(),
+				ctx:  t.Context(),
 				name: "pwd",
 				arg:  []string{},
 			},
@@ -56,7 +56,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 		{
 			name: "creates_commander_with_context",
 			args: args{
-				ctx:  context.Background(),
+				ctx:  t.Context(),
 				name: "echo",
 				arg:  []string{"test"},
 			},
@@ -64,7 +64,7 @@ func TestExecCommandBuilder_New(t *testing.T) {
 		{
 			name: "sets_env_on_command",
 			args: args{
-				ctx:  context.Background(),
+				ctx:  t.Context(),
 				name: "env",
 				arg:  []string{},
 			},
@@ -131,7 +131,7 @@ func TestExecCmd_SetDir(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New("echo", "test")
 			cmd.SetDir(tt.args.dir)
 			// Just verify it doesn't panic - actual dir check would require reflection
@@ -164,7 +164,7 @@ func TestExecCmd_SetStdin(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New("cat")
 			cmd.SetStdin(strings.NewReader(tt.input))
 			// Just verify it doesn't panic
@@ -190,7 +190,7 @@ func TestExecCmd_SetStdout(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New("echo", "test")
 
 			var stdout bytes.Buffer
@@ -218,7 +218,7 @@ func TestExecCmd_SetStderr(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New("echo", "test")
 
 			var stderr bytes.Buffer
@@ -239,7 +239,7 @@ func TestExecCmd_ProcessKill(t *testing.T) {
 		{
 			name: "kills_nil_process_without_error",
 			setup: func(t *testing.T) rubrics.Commander {
-				builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+				builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 				return builder.New("echo", "hello")
 			},
 			wantErr: false,
@@ -247,7 +247,7 @@ func TestExecCmd_ProcessKill(t *testing.T) {
 		{
 			name: "kills_started_process",
 			setup: func(t *testing.T) rubrics.Commander {
-				builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+				builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 				cmd := builder.New("sleep", "60")
 				err := cmd.Start()
 				require.NoError(t, err)
@@ -315,7 +315,7 @@ func TestExecCmd_Start(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New(tt.args.name, tt.args.arg...)
 
 			err := cmd.Start()
@@ -381,7 +381,7 @@ func TestExecCmd_Run(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New(tt.args.name, tt.args.arg...)
 
 			err := cmd.Run()
@@ -398,7 +398,7 @@ func TestExecCmd_Run(t *testing.T) {
 func TestExecCommandBuilder_Integration(t *testing.T) {
 	t.Parallel()
 
-	builder := &rubrics.ExecCommandBuilder{Context: context.Background()}
+	builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 	var cmd rubrics.Commander
 	if runtime.GOOS == osWindows {
 		cmd = builder.New("cmd", "/C", "echo", "hello")
@@ -421,7 +421,7 @@ func TestExecCmd_ProcessKill_WithRunningProcess(t *testing.T) {
 	t.Parallel()
 
 	// Start a long-running process we can kill
-	cmd := exec.CommandContext(context.Background(), "sleep", "60")
+	cmd := exec.CommandContext(t.Context(), "sleep", "60")
 	require.NoError(t, cmd.Start())
 
 	err := cmd.Process.Kill()

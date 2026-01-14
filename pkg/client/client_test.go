@@ -21,6 +21,8 @@ import (
 	pb "github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/proto/protoconnect"
 	"github.com/jh125486/gradebot/pkg/rubrics"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestWorkDirValidate(t *testing.T) {
@@ -180,72 +182,115 @@ func TestNewAuthTransport(t *testing.T) {
 func TestAuthTransportRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	token := "test-token-12345"
-
-	mockRT := &mockRoundTripper{
-		response: &http.Response{
-			StatusCode: http.StatusOK,
-			Body:       io.NopCloser(strings.NewReader("OK")),
+	type args struct {
+		token  string
+		status int
+		body   string
+	}
+	tests := []struct {
+		name string
+		args args
+	}{
+		{
+			name: "adds_bearer_token_to_request",
+			args: args{token: "test-token-12345", status: http.StatusOK, body: "OK"},
+		},
+		{
+			name: "handles_different_token",
+			args: args{token: "another-token-789", status: http.StatusOK, body: "OK"},
+		},
+		{
+			name: "preserves_response_status",
+			args: args{token: "token", status: http.StatusCreated, body: "Created"},
 		},
 	}
 
-	transport := client.NewAuthTransport(token, mockRT)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, "http://example.com/test", http.NoBody)
-	if err != nil {
-		t.Fatalf("failed to create request: %v", err)
-	}
+			mockRT := &mockRoundTripper{
+				response: &http.Response{
+					StatusCode: tt.args.status,
+					Body:       io.NopCloser(strings.NewReader(tt.args.body)),
+				},
+			}
 
-	resp, err := transport.RoundTrip(req)
-	if err != nil {
-		t.Fatalf("RoundTrip() error = %v", err)
-	}
-	defer resp.Body.Close()
+			transport := client.NewAuthTransport(tt.args.token, mockRT)
 
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("expected status 200, got %d", resp.StatusCode)
-	}
+			req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, "http://example.com/test", http.NoBody)
+			require.NoError(t, err)
 
-	// Check that Authorization header was added
-	if mockRT.lastRequest == nil {
-		t.Fatal("mockRoundTripper did not receive request")
-	}
+			resp, err := transport.RoundTrip(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
 
-	authHeader := mockRT.lastRequest.Header.Get("Authorization")
-	expectedAuth := "Bearer " + token
-	if authHeader != expectedAuth {
-		t.Errorf("Authorization header = %q, want %q", authHeader, expectedAuth)
+			assert.Equal(t, tt.args.status, resp.StatusCode)
+
+			require.NotNil(t, mockRT.lastRequest, "mockRoundTripper should have received request")
+
+			authHeader := mockRT.lastRequest.Header.Get("Authorization")
+			expectedAuth := "Bearer " + tt.args.token
+			assert.Equal(t, expectedAuth, authHeader)
+		})
 	}
 }
 
 func TestDirectoryError(t *testing.T) {
 	t.Parallel()
 
-	baseErr := errors.New("test error")
-	dirErr := &client.DirectoryError{Err: baseErr}
-
-	// Test Error() method
-	errMsg := dirErr.Error()
-	if !strings.Contains(errMsg, "test error") {
-		t.Errorf("Error() should contain base error message, got: %s", errMsg)
+	type args struct {
+		errorMsg string
+	}
+	tests := []struct {
+		name              string
+		args              args
+		shouldContainText string
+	}{
+		{
+			name:              "error_contains_message",
+			args:              args{errorMsg: "test error"},
+			shouldContainText: "test error",
+		},
+		{
+			name:              "error_contains_different_message",
+			args:              args{errorMsg: "connection failed"},
+			shouldContainText: "connection failed",
+		},
+		{
+			name:              "error_unwrap_works",
+			args:              args{errorMsg: "wrapped error"},
+			shouldContainText: "wrapped error",
+		},
 	}
 
-	// Error message should contain OS-specific help
-	if runtime.GOOS == "darwin" && !strings.Contains(errMsg, "macOS") {
-		t.Error("Error() should contain macOS help on darwin")
-	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	// Test Unwrap() method
-	unwrapped := dirErr.Unwrap()
-	if !errors.Is(unwrapped, baseErr) {
-		t.Errorf("Unwrap() = %v, want %v", unwrapped, baseErr)
+			baseErr := errors.New(tt.args.errorMsg)
+			dirErr := &client.DirectoryError{Err: baseErr}
+
+			// Test Error() method
+			errMsg := dirErr.Error()
+			assert.Contains(t, errMsg, tt.shouldContainText, "Error() should contain base error message")
+
+			// Error message should contain OS-specific help
+			if runtime.GOOS == "darwin" {
+				assert.Contains(t, errMsg, "macOS", "Error() should contain macOS help on darwin")
+			}
+
+			// Test Unwrap() method
+			unwrapped := dirErr.Unwrap()
+			assert.True(t, errors.Is(unwrapped, baseErr), "Unwrap() should return the original error")
+		})
 	}
 }
 
 func TestUploadResult(t *testing.T) {
 	t.Parallel()
 
-	ctx := contextlog.With(context.Background(), contextlog.DiscardLogger())
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 
 	tests := []struct {
 		name             string
@@ -353,7 +398,7 @@ func TestUploadResult(t *testing.T) {
 func TestExecuteProject(t *testing.T) {
 	t.Parallel()
 
-	ctx := contextlog.With(context.Background(), contextlog.DiscardLogger())
+	ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 
 	tests := []struct {
 		name        string
