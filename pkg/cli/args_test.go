@@ -1,35 +1,77 @@
 package cli_test
 
 import (
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
-	"time"
 
 	"github.com/jh125486/gradebot/pkg/cli"
+	"github.com/jh125486/gradebot/pkg/client"
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 )
 
-func TestNewService(t *testing.T) {
+func TestCommonArgsValidate(t *testing.T) {
 	t.Parallel()
 
-	type args struct {
-		buildID string
-	}
 	tests := []struct {
-		name string
-		args args
+		name          string
+		setup         func(t *testing.T) (string, func())
+		wantErr       bool
+		errContains   string
+		skipOnWindows bool
 	}{
 		{
-			name: "with_build_id",
-			args: args{buildID: "test-build-123"},
+			name: "empty_path",
+			setup: func(t *testing.T) (string, func()) {
+				return "", nil
+			},
+			wantErr:     true,
+			errContains: "work directory not specified",
 		},
 		{
-			name: "with_different_build_id",
-			args: args{buildID: "prod-build-456"},
+			name: "valid_directory",
+			setup: func(t *testing.T) (string, func()) {
+				return t.TempDir(), nil
+			},
+			wantErr: false,
 		},
 		{
-			name: "with_empty_build_id",
-			args: args{buildID: ""},
+			name: "nonexistent_directory",
+			setup: func(t *testing.T) (string, func()) {
+				return "/path/that/does/not/exist", nil
+			},
+			wantErr:     true,
+			errContains: "no such file or directory",
+		},
+		{
+			name: "path_is_file_not_directory",
+			setup: func(t *testing.T) (string, func()) {
+				dir := t.TempDir()
+				f := filepath.Join(dir, "file.txt")
+				if err := os.WriteFile(f, []byte("test"), 0o644); err != nil {
+					t.Fatalf("failed to create test file: %v", err)
+				}
+				return f, nil
+			},
+			wantErr:     true,
+			errContains: "is not a directory",
+		},
+		{
+			name: "unreadable_directory",
+			setup: func(t *testing.T) (string, func()) {
+				if runtime.GOOS == "windows" {
+					t.Skip("Skip on Windows - permission handling differs")
+				}
+				dir := t.TempDir()
+				if err := os.Chmod(dir, 0o000); err != nil {
+					t.Fatalf("failed to change permissions: %v", err)
+				}
+				return dir, func() { _ = os.Chmod(dir, 0o755) }
+			},
+			wantErr:       true,
+			errContains:   "permission denied",
+			skipOnWindows: true,
 		},
 	}
 
@@ -37,15 +79,25 @@ func TestNewService(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			svc := cli.NewService(tt.args.buildID)
+			if tt.skipOnWindows && runtime.GOOS == "windows" {
+				t.Skip("directory permission semantics differ on Windows")
+			}
 
-			require.NotNil(t, svc)
-			require.NotNil(t, svc.Client, "Client should be initialized")
-			assert.Equal(t, 30*time.Second, svc.Client.Timeout, "Timeout should be 30 seconds")
-			assert.NotNil(t, svc.Client.Transport, "Transport should be set")
+			path, cleanup := tt.setup(t)
+			if cleanup != nil {
+				t.Cleanup(cleanup)
+			}
 
-			assert.NotNil(t, svc.Stdin, "Stdin should be initialized")
-			assert.NotNil(t, svc.Stdout, "Stdout should be initialized")
+			args := cli.CommonArgs{WorkDir: client.WorkDir(path)}
+			err := args.Validate()
+
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("CommonArgs.Validate() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.errContains != "" && err != nil {
+				assert.Contains(t, err.Error(), tt.errContains)
+			}
 		})
 	}
 }
