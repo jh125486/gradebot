@@ -415,7 +415,7 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         new(bytes.Buffer),
 					Reader:         strings.NewReader("n\n"),
@@ -447,7 +447,7 @@ func TestExecuteProject(t *testing.T) {
 				dir := t.TempDir()
 				output := new(bytes.Buffer)
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         output,
 					Reader:         strings.NewReader("n\n"),
@@ -476,7 +476,7 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("y\n"),
@@ -497,7 +497,7 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("y\n"),
@@ -522,10 +522,10 @@ func TestExecuteProject(t *testing.T) {
 				_ = os.MkdirAll(filepath.Dir(invalidFile), 0o755)
 				_ = os.WriteFile(invalidFile, []byte("test"), 0o644)
 				return &client.Config{
-					Dir:    client.WorkDir(dir),
-					RunCmd: "echo test",
-					Writer: io.Discard,
-					Reader: strings.NewReader("n\n"),
+					WorkDir: client.WorkDir(dir),
+					RunCmd:  "echo test",
+					Writer:  io.Discard,
+					Reader:  strings.NewReader("n\n"),
 					// Use default factory (nil) to trigger real cleanup
 				}
 			},
@@ -540,7 +540,7 @@ func TestExecuteProject(t *testing.T) {
 				// Create a simple test file for quality check
 				_ = os.WriteFile(filepath.Join(dir, "test.go"), []byte("package main\n"), 0o644)
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("n\n"),
@@ -557,7 +557,7 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:            client.WorkDir(dir),
+					WorkDir:        client.WorkDir(dir),
 					RunCmd:         "echo test",
 					Writer:         io.Discard,
 					Reader:         strings.NewReader("n\n"),
@@ -588,10 +588,10 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:    client.WorkDir(dir),
-					RunCmd: "echo test",
-					Writer: io.Discard,
-					Reader: strings.NewReader("n\n"),
+					WorkDir: client.WorkDir(dir),
+					RunCmd:  "echo test",
+					Writer:  io.Discard,
+					Reader:  strings.NewReader("n\n"),
 					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
 						return nil, fmt.Errorf("builder failed")
 					},
@@ -606,10 +606,10 @@ func TestExecuteProject(t *testing.T) {
 			setupConfig: func() *client.Config {
 				dir := t.TempDir()
 				return &client.Config{
-					Dir:    client.WorkDir(dir),
-					RunCmd: "echo test",
-					Writer: io.Discard,
-					Reader: strings.NewReader("n\n"),
+					WorkDir: client.WorkDir(dir),
+					RunCmd:  "echo test",
+					Writer:  io.Discard,
+					Reader:  strings.NewReader("n\n"),
 					ProgramBuilder: func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
 						return &stubProgramWithRunError{}, nil
 					},
