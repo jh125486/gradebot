@@ -34,7 +34,7 @@ func (w WorkDir) Validate() error {
 
 	info, err := os.Stat(path)
 	if err != nil {
-		return &DirectoryError{Err: err}
+		return &DirectoryError{dir: path, Err: err}
 	}
 	if !info.IsDir() {
 		return fmt.Errorf("work directory %q is not a directory", path)
@@ -42,12 +42,12 @@ func (w WorkDir) Validate() error {
 
 	f, err := os.Open(path)
 	if err != nil {
-		return &DirectoryError{Err: err}
+		return &DirectoryError{dir: path, Err: err}
 	}
 	defer f.Close()
 
 	if _, err := f.Readdirnames(1); err != nil && err != io.EOF {
-		return &DirectoryError{Err: err}
+		return &DirectoryError{dir: path, Err: err}
 	}
 
 	return nil
@@ -60,6 +60,7 @@ func (w WorkDir) String() string {
 
 // DirectoryError represents an error related to directory access
 type DirectoryError struct {
+	dir string
 	Err error
 }
 
@@ -74,11 +75,11 @@ func (e *DirectoryError) Unwrap() error {
 func (e *DirectoryError) getPermissionHelp() string {
 	switch runtime.GOOS {
 	case "darwin":
-		return "macOS help: System Preferences → Security & Privacy → Privacy → Full Disk Access\nOr try: chmod 755 /path/to/directory"
+		return "macOS help: System Preferences → Security & Privacy → Privacy → Full Disk Access\nOr try: chmod 755 " + e.dir
 	case "windows":
 		return "Windows help: Right-click folder → Properties → Security → Edit permissions\nOr run as Administrator"
 	case "linux":
-		return "Linux help: chmod 755 /path/to/directory\nOr check file ownership with: ls -la"
+		return fmt.Sprintf("Linux help: chmod 755 %s\nOr check file ownership with: ls -la", e.dir)
 	default:
 		return "Check directory permissions and ownership"
 	}
@@ -89,9 +90,9 @@ type Config struct {
 	ServerURL string
 
 	// Execution specific fields
-	Dir    WorkDir
-	RunCmd string
-	Env    map[string]string
+	WorkDir WorkDir
+	RunCmd  string
+	Env     map[string]string
 
 	// Connect client for the QualityService
 	QualityClient protoconnect.QualityServiceClient
@@ -248,7 +249,7 @@ func ExecuteProject(ctx context.Context, cfg *Config, name, instructions string,
 		}
 	}
 
-	program, err := cfg.ProgramBuilder(cfg.Dir.String(), cfg.RunCmd)
+	program, err := cfg.ProgramBuilder(cfg.WorkDir.String(), cfg.RunCmd)
 	if err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, "failed to create program", slog.Any("error", err))
 		return err
