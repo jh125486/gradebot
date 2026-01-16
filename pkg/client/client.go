@@ -113,6 +113,8 @@ type Config struct {
 }
 
 // AuthTransport injects an Authorization header for every outgoing request.
+// It wraps an existing http.RoundTripper and adds a "Authorization: Bearer {token}"
+// header to each outgoing request.
 type AuthTransport struct {
 	base  http.RoundTripper
 	token string
