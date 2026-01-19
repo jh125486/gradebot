@@ -10,43 +10,30 @@ import (
 
 	"github.com/jh125486/gradebot/pkg/contextlog"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
-func TestDirectoryError_getPermissionHelp(t *testing.T) {
+func TestDirectoryError_ErrorIncludesPermissionHelp(t *testing.T) {
 	t.Parallel()
 
-	tests := []struct {
-		name     string
-		wantText string
-	}{
-		{
-			name: "returns_help_text",
-			// We can't easily test all OS branches without build tags,
-			// but we can verify it returns non-empty help text
-			wantText: "",
-		},
-	}
+	// Exercise exported behavior: WorkDir.Validate returns an error
+	// when the path doesn't exist. The returned error's message should
+	// include permission help to assist users.
+	nonexistent := WorkDir("/this-path-should-not-exist-please-remove-if-it-does")
+	err := nonexistent.Validate()
+	require.Error(t, err)
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			err := &DirectoryError{Err: io.ErrUnexpectedEOF}
-			help := err.getPermissionHelp()
-			assert.NotEmpty(t, help, "getPermissionHelp should return non-empty help text")
-
-			// Verify help text contains expected keywords based on OS
-			switch runtime.GOOS {
-			case "darwin":
-				assert.Contains(t, help, "macOS")
-			case "windows":
-				assert.Contains(t, help, "Windows")
-			case "linux":
-				assert.Contains(t, help, "Linux")
-			default:
-				assert.Contains(t, help, "permissions")
-			}
-		})
+	// The error string should include a human-helpful hint based on OS
+	s := err.Error()
+	switch runtime.GOOS {
+	case "darwin":
+		assert.Contains(t, s, "macOS")
+	case "windows":
+		assert.Contains(t, s, "Windows")
+	case "linux":
+		assert.Contains(t, s, "Linux")
+	default:
+		assert.Contains(t, s, "permissions")
 	}
 }
 
