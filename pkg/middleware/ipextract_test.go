@@ -73,12 +73,14 @@ func TestStoreRealIPMiddleware(t *testing.T) {
 	}
 }
 
+func ptr[T any](t T) *T { return &t }
+
 func TestClientIP(t *testing.T) {
 	t.Parallel()
 
 	tests := []struct {
 		name         string
-		contextValue string // empty => no context value, otherwise used as RealIPKey
+		contextValue *string
 		headers      http.Header
 		peer         connect.Peer
 		want         string
@@ -108,10 +110,10 @@ func TestClientIP(t *testing.T) {
 		{name: "peer_empty_returns_unknown", headers: headers(map[string]string{}), peer: connect.Peer{Addr: ""}, want: middleware.UnknownIP},
 
 		// Context priority and fallbacks
-		{name: "context_priority_over_headers", contextValue: "10.0.0.1", headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1", "X-Real-IP": "172.16.0.1"}), peer: connect.Peer{Addr: "203.0.113.1:8080"}, want: "10.0.0.1"},
+		{name: "context_priority_over_headers", contextValue: ptr("10.0.0.1"), headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1", "X-Real-IP": "172.16.0.1"}), peer: connect.Peer{Addr: "203.0.113.1:8080"}, want: "10.0.0.1"},
 		{name: "xff_priority_over_xrealip", headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1", "X-Real-IP": "10.0.0.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "192.168.1.1"},
-		{name: "context_empty_string_falls_back_to_headers", headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "192.168.1.1"},
-		{name: "context_unknown_falls_back_to_headers", contextValue: middleware.UnknownIP, headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "192.168.1.1"},
+		{name: "context_empty_string_falls_back_to_headers", contextValue: ptr(""), headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "192.168.1.1"},
+		{name: "context_unknown_falls_back_to_headers", contextValue: ptr(middleware.UnknownIP), headers: headers(map[string]string{"X-Forwarded-For": "192.168.1.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "192.168.1.1"},
 		{name: "xrealip_priority_over_cf", headers: headers(map[string]string{"X-Real-IP": "10.0.0.1", "CF-Connecting-IP": "203.0.113.1"}), peer: connect.Peer{Addr: "172.16.0.1:8080"}, want: "10.0.0.1"},
 	}
 
@@ -120,8 +122,8 @@ func TestClientIP(t *testing.T) {
 			t.Parallel()
 
 			ctx := t.Context()
-			if tt.contextValue != "" {
-				ctx = context.WithValue(ctx, middleware.RealIPKey, tt.contextValue)
+			if tt.contextValue != nil {
+				ctx = context.WithValue(ctx, middleware.RealIPKey, *tt.contextValue)
 			}
 
 			req := &mockExtractable{headers: tt.headers, peer: tt.peer}
