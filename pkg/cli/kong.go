@@ -22,7 +22,7 @@ type BuildID string
 func NewKongContext(ctx context.Context, name, id string, cli any, args []string, opts ...kong.Option) *kong.Context {
 	hashedID := sha256.Sum256([]byte(id))
 	buildID := hex.EncodeToString(hashedID[:])
-	svc := NewService(buildID)
+	svc := New(buildID)
 
 	opts = append(opts,
 		kong.Name(name),

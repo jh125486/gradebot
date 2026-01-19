@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os"
 	"time"
 
 	"github.com/docker/docker/pkg/namesgenerator"
@@ -37,9 +36,6 @@ type (
 
 // Render outputs the grading result as a formatted table.
 func (r *Result) Render(w io.Writer) {
-	if w == nil {
-		w = os.Stdout
-	}
 	// Configure per-column alignment: Name (left), Points (right), Awarded (right), Notes (left)
 	table := tablewriter.NewTable(w, tablewriter.WithConfig(tablewriter.Config{
 		Row: tw.CellConfig{

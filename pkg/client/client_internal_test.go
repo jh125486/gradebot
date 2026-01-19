@@ -102,9 +102,10 @@ func TestPromptForSubmission(t *testing.T) {
 				tt.args.ctx = t.Context()
 			}
 			tt.args.ctx = contextlog.With(tt.args.ctx, contextlog.DiscardLogger())
-			// Use a bytes.Buffer to capture output
+			// Use a bytes.Buffer to capture output for normal cases
 			output := new(bytes.Buffer)
 			if tt.args.w == nil {
+				// For the table-driven cases we want a non-nil writer so the prompt can be written
 				tt.args.w = output
 			}
 			got := PromptForSubmission(tt.args.ctx, tt.args.w, tt.args.r)
@@ -114,4 +115,26 @@ func TestPromptForSubmission(t *testing.T) {
 			}
 		})
 	}
+
+	// Additional cases to validate nil writer/reader behavior
+	t.Run("nil_writer_returns_false", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+		ctx = contextlog.With(ctx, contextlog.DiscardLogger())
+		got := PromptForSubmission(ctx, nil, strings.NewReader("y\n"))
+		if got != false {
+			t.Errorf("PromptForSubmission() with nil writer = %v, want %v", got, false)
+		}
+	})
+
+	t.Run("nil_reader_returns_false", func(t *testing.T) {
+		t.Parallel()
+		ctx := t.Context()
+		ctx = contextlog.With(ctx, contextlog.DiscardLogger())
+		output := new(bytes.Buffer)
+		got := PromptForSubmission(ctx, output, nil)
+		if got != false {
+			t.Errorf("PromptForSubmission() with nil reader = %v, want %v", got, false)
+		}
+	})
 }
