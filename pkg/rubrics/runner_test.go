@@ -3,6 +3,7 @@ package rubrics_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -249,6 +250,9 @@ func TestExecCmd_ProcessKill(t *testing.T) {
 			setup: func(t *testing.T) rubrics.Commander {
 				builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 				cmd := builder.New("sleep", "60")
+				// Prevent any child-process output from polluting test stdout/stderr
+				cmd.SetStdout(io.Discard)
+				cmd.SetStderr(io.Discard)
 				err := cmd.Start()
 				require.NoError(t, err)
 				return cmd
@@ -317,6 +321,10 @@ func TestExecCmd_Start(t *testing.T) {
 
 			builder := &rubrics.ExecCommandBuilder{Context: t.Context()}
 			cmd := builder.New(tt.args.name, tt.args.arg...)
+
+			// Prevent started processes from writing to test stdout/stderr
+			cmd.SetStdout(io.Discard)
+			cmd.SetStderr(io.Discard)
 
 			err := cmd.Start()
 
@@ -422,6 +430,8 @@ func TestExecCmd_ProcessKill_WithRunningProcess(t *testing.T) {
 
 	// Start a long-running process we can kill
 	cmd := exec.CommandContext(t.Context(), "sleep", "60")
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
 	require.NoError(t, cmd.Start())
 
 	err := cmd.Process.Kill()

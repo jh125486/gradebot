@@ -43,19 +43,11 @@ func ExampleNewKongContext() {
 	// Manually construct a service and run the command to demonstrate how the
 	// Run method receives an injected *cli.Service. This keeps the example
 	// deterministic and safe to run in package tests.
-	svc := cli.NewService("build-id-123")
+	svc := cli.New("build-id-123")
 	cmd := &exampleCommand{Args: cli.CommonArgs{WorkDir: cli.CommonArgs{}.WorkDir}} // leave defaults
 	_ = cmd.Run(svc)
 
 	// Output:
 	// kctx_created: true
 	// svc_ok: true
-}
-
-// Existing simple example retained for backwards compatibility.
-func ExampleNewService() {
-	svc := cli.NewService("build-id-123")
-	// Ensure the client was constructed
-	fmt.Println(svc.Client != nil)
-	// Output: true
 }

@@ -10,7 +10,7 @@ import (
 	"connectrpc.com/connect"
 	pb "github.com/jh125486/gradebot/pkg/proto"
 	"github.com/jh125486/gradebot/pkg/rubrics"
-	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 // errorFS is a filesystem that can be configured to return errors
@@ -147,316 +147,196 @@ func (m *mockProgramRunner) Kill() error                       { return nil }
 func (m *mockProgramRunner) Cleanup(ctx context.Context) error { return nil }
 
 func TestEvaluateQuality(t *testing.T) {
+	type args struct {
+		instructions string
+		mockClient   *MockQualityServiceClient
+		sourceFS     fs.FS
+	}
+	type want struct {
+		name        string
+		noteContain string
+		points      float64
+		errContain  string // non-empty means we expect an error message in the note
+	}
+
 	tests := []struct {
-		name           string
-		instructions   string
-		mockClient     *MockQualityServiceClient
-		sourceFS       fs.FS
-		expectedName   string
-		expectedNote   string
-		expectedPoints float64
-		expectedError  string
+		name   string
+		args   args
+		want   want
+		setup  func(t *testing.T)
+		verify func(t *testing.T, got rubrics.RubricItem)
 	}{
 		{
-			name:         "Success",
-			instructions: "Review this Go code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 85,
-					Feedback:     "Good code quality",
+			name: "Success",
+			args: args{
+				instructions: "Review this Go code",
+				mockClient: &MockQualityServiceClient{
+					EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 85, Feedback: "Good code quality"},
 				},
-				EvaluateError: nil,
+				sourceFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\n\nfunc main() { println(\"hello\") }")}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go": &fstest.MapFile{Data: []byte("package main\n\nfunc main() { println(\"hello\") }")},
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Good code quality",
-			expectedPoints: 17.0, // 85/100 * 20
+			want: want{name: "Quality", noteContain: "Good code quality", points: 17.0},
 		},
 		{
-			name:         "ClientError",
-			instructions: "Review this code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: nil,
-				EvaluateError:    fmt.Errorf("API error"),
+			name: "ClientError",
+			args: args{
+				instructions: "Review this code",
+				mockClient:   &MockQualityServiceClient{EvaluateError: fmt.Errorf("API error")},
+				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\n\nfunc main() { println(\"hello\") }")}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go": &fstest.MapFile{Data: []byte("package main\n\nfunc main() { println(\"hello\") }")},
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Connect call failed: API error",
-			expectedPoints: 0,
+			want: want{name: "Quality", errContain: "Connect call failed: API error", points: 0},
 		},
 		{
-			name:         "EmptyFilesystem",
-			instructions: "Review this code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Great code",
-				},
-				EvaluateError: nil,
+			name: "EmptyFilesystem",
+			args: args{
+				instructions: "Review this code",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Great code"}},
+				sourceFS:     fstest.MapFS{},
 			},
-			sourceFS:       fstest.MapFS{}, // Empty filesystem - no Go files to process
-			expectedName:   "Quality",
-			expectedNote:   "Great code",
-			expectedPoints: 18.0, // 90/100 * 20
+			want: want{name: "Quality", noteContain: "Great code", points: 18.0},
 		},
 		{
-			name:         "LoadFilesFileSystemError",
-			instructions: "Review this code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Great code",
-				},
-				EvaluateError: nil,
+			name: "LoadFilesFileSystemError",
+			args: args{
+				instructions: "Review this code",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Great code"}},
+				sourceFS:     &errorFS{MapFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}}, readFileError: true, readFileErrorPath: "main.go"},
 			},
-			sourceFS: &errorFS{
-				MapFS: fstest.MapFS{
-					"main.go": &fstest.MapFile{Data: []byte("package main")},
-				},
-				readFileError:     true,
-				readFileErrorPath: "main.go",
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Failed to prepare code for review:",
-			expectedPoints: 0,
+			want: want{name: "Quality", errContain: "Failed to prepare code for review:", points: 0},
 		},
 		{
-			name:         "BinaryFileSkipped",
-			instructions: "Review this mixed code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 75,
-					Feedback:     "Decent code quality",
-				},
-				EvaluateError: nil,
+			name: "BinaryFileSkipped",
+			args: args{
+				instructions: "Review this mixed code",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 75, Feedback: "Decent code quality"}},
+				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\nfunc main() {}")}, "binary.go": &fstest.MapFile{Data: []byte{0x00, 0x01, 0x02, 0xFF, 0xFE}}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go":   &fstest.MapFile{Data: []byte("package main\nfunc main() {}")},
-				"binary.go": &fstest.MapFile{Data: []byte{0x00, 0x01, 0x02, 0xFF, 0xFE}}, // Valid .go extension but invalid UTF-8, should be skipped
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Decent code quality",
-			expectedPoints: 15.0, // 75/100 * 20, only main.go should be processed (binary.go skipped by UTF-8 check)
+			want: want{name: "Quality", noteContain: "Decent code quality", points: 15.0},
 		},
 		{
-			name:         "ExcludeDirectories",
-			instructions: "Review this structured code",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 80,
-					Feedback:     "Good structure",
-				},
-				EvaluateError: nil,
+			name: "ExcludeDirectories",
+			args: args{
+				instructions: "Review this structured code",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 80, Feedback: "Good structure"}},
+				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}, "src/lib.go": &fstest.MapFile{Data: []byte("package lib")}, "target/main.go": &fstest.MapFile{Data: []byte("package target")}, ".git/config": &fstest.MapFile{Data: []byte("git config")}, "node_modules/x.js": &fstest.MapFile{Data: []byte("console.log('test')")}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go":           &fstest.MapFile{Data: []byte("package main")},
-				"src/lib.go":        &fstest.MapFile{Data: []byte("package lib")},
-				"target/main.go":    &fstest.MapFile{Data: []byte("package target")},      // Should be excluded
-				".git/config":       &fstest.MapFile{Data: []byte("git config")},          // Should be excluded
-				"node_modules/x.js": &fstest.MapFile{Data: []byte("console.log('test')")}, // Should be excluded
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Good structure",
-			expectedPoints: 16.0, // 80/100 * 20, only main.go and src/lib.go processed
+			want: want{name: "Quality", noteContain: "Good structure", points: 16.0},
 		},
 		{
-			name:         "MixedFileTypes",
-			instructions: "Review multiple languages",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 85,
-					Feedback:     "Multi-language code",
-				},
-				EvaluateError: nil,
+			name: "MixedFileTypes",
+			args: args{
+				instructions: "Review multiple languages",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 85, Feedback: "Multi-language code"}},
+				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}, "app.py": &fstest.MapFile{Data: []byte("print('hello')")}, "lib.rs": &fstest.MapFile{Data: []byte("fn main() {}")}, "script.js": &fstest.MapFile{Data: []byte("console.log('test')")}, "config.yaml": &fstest.MapFile{Data: []byte("key: value")}, "README": &fstest.MapFile{Data: []byte("readme")}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go":     &fstest.MapFile{Data: []byte("package main")},
-				"app.py":      &fstest.MapFile{Data: []byte("print('hello')")},
-				"lib.rs":      &fstest.MapFile{Data: []byte("fn main() {}")},
-				"script.js":   &fstest.MapFile{Data: []byte("console.log('test')")},
-				"config.yaml": &fstest.MapFile{Data: []byte("key: value")}, // Should be excluded
-				"README":      &fstest.MapFile{Data: []byte("readme")},     // No extension, excluded
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Multi-language code",
-			expectedPoints: 17.0, // 85/100 * 20, processes .go, .py, .rs, .js files
+			want: want{name: "Quality", noteContain: "Multi-language code", points: 17.0},
 		},
 		{
-			name:         "WalkDirError",
-			instructions: "Review code with walk error",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Good code",
-				},
-				EvaluateError: nil,
+			name: "WalkDirError",
+			args: args{
+				instructions: "Review code with walk error",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Good code"}},
+				sourceFS:     &walkDirErrorFS{MapFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}, "baddir/file.go": &fstest.MapFile{Data: []byte("package baddir")}}},
 			},
-			sourceFS: &walkDirErrorFS{
-				MapFS: fstest.MapFS{
-					"main.go":        &fstest.MapFile{Data: []byte("package main")},
-					"baddir/file.go": &fstest.MapFile{Data: []byte("package baddir")},
-				},
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Failed to prepare code for review:",
-			expectedPoints: 0, // Error should result in 0 points
+			want: want{name: "Quality", errContain: "Failed to prepare code for review:", points: 0},
 		},
 		{
-			name:         "ConfigLoadError",
-			instructions: "Review code with config error",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Good code",
-				},
-				EvaluateError: nil,
+			name: "ConfigLoadError",
+			args: args{
+				instructions: "Review code with config error",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Good code"}},
+				sourceFS:     &configErrorFS{MapFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}}, walkError: true},
 			},
-			sourceFS: &configErrorFS{
-				MapFS: fstest.MapFS{
-					"main.go": &fstest.MapFile{Data: []byte("package main")},
-				},
-				walkError: true,
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Failed to prepare code for review:",
-			expectedPoints: 0, // Config error should result in 0 points
+			want: want{name: "Quality", errContain: "Failed to prepare code for review:", points: 0},
 		},
 		{
-			name:         "FileWalkError",
-			instructions: "Review code with specific walk error",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Good code",
-				},
-				EvaluateError: nil,
+			name: "FileWalkError",
+			args: args{
+				instructions: "Review code with specific walk error",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Good code"}},
+				sourceFS:     &specificErrorFS{MapFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}}, triggerWalkErr: true},
 			},
-			sourceFS: &specificErrorFS{
-				MapFS: fstest.MapFS{
-					"main.go": &fstest.MapFile{Data: []byte("package main")},
-				},
-				triggerWalkErr: true,
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Failed to prepare code for review:",
-			expectedPoints: 0, // Walk error should result in 0 points
+			want: want{name: "Quality", errContain: "Failed to prepare code for review:", points: 0},
 		},
 		{
-			name:         "MultipleFileTypesWithErrors",
-			instructions: "Comprehensive file processing test",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 85,
-					Feedback:     "Mixed code quality",
+			name: "MultipleFileTypesWithErrors",
+			args: args{
+				instructions: "Comprehensive file processing test",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 85, Feedback: "Mixed code quality"}},
+				sourceFS: fstest.MapFS{
+					"main.go":       &fstest.MapFile{Data: []byte("package main\nfunc main() { println(\"hello\") }")},
+					"lib.py":        &fstest.MapFile{Data: []byte("def hello(): print('world')")},
+					"script.js":     &fstest.MapFile{Data: []byte("console.log('test');")},
+					"app.rs":        &fstest.MapFile{Data: []byte("fn main() { println!(\"rust\"); }")},
+					"config.toml":   &fstest.MapFile{Data: []byte("key = 'value'")},
+					"binary.go":     &fstest.MapFile{Data: []byte{0xFF, 0xFE, 0x00}},
+					"empty.go":      &fstest.MapFile{Data: []byte("")},
+					"target/out.go": &fstest.MapFile{Data: []byte("package target")},
+					"src/nested.go": &fstest.MapFile{Data: []byte("package nested")},
 				},
-				EvaluateError: nil,
 			},
-			sourceFS: fstest.MapFS{
-				"main.go":       &fstest.MapFile{Data: []byte("package main\nfunc main() { println(\"hello\") }")},
-				"lib.py":        &fstest.MapFile{Data: []byte("def hello(): print('world')")},
-				"script.js":     &fstest.MapFile{Data: []byte("console.log('test');")},
-				"app.rs":        &fstest.MapFile{Data: []byte("fn main() { println!(\"rust\"); }")},
-				"config.toml":   &fstest.MapFile{Data: []byte("key = 'value'")},  // No extension in allowlist
-				"binary.go":     &fstest.MapFile{Data: []byte{0xFF, 0xFE, 0x00}}, // Invalid UTF-8 but valid .go extension
-				"empty.go":      &fstest.MapFile{Data: []byte("")},               // Empty but valid UTF-8
-				"target/out.go": &fstest.MapFile{Data: []byte("package target")}, // Excluded directory
-				"src/nested.go": &fstest.MapFile{Data: []byte("package nested")}, // Nested directory
+			want: want{name: "Quality", noteContain: "Mixed code quality", points: 17.0},
+		},
+
+		{
+			name: "UTF8ValidationTest",
+			args: args{
+				instructions: "Test UTF-8 validation path",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 100, Feedback: "Only valid UTF-8 files processed"}},
+				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\nfunc main() { fmt.Println(\"Hello\") }")}, "invalid.go": &fstest.MapFile{Data: []byte{0xFF, 0xFE, 0xFD}}},
 			},
-			expectedName:   "Quality",
-			expectedNote:   "Mixed code quality",
-			expectedPoints: 17.0, // 85/100 * 20, processes valid source files
+			want: want{name: "Quality", noteContain: "Only valid UTF-8 files processed", points: 20.0},
 		},
 		{
-			name:         "UTF8ValidationTest",
-			instructions: "Test UTF-8 validation path",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 100, // Make it easier to calculate expected points
-					Feedback:     "Only valid UTF-8 files processed",
-				},
-				EvaluateError: nil,
+			name: "WalkDirErrorTest",
+			args: args{
+				instructions: "Test WalkDir error handling",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 80, Feedback: "Files processed"}},
+				sourceFS:     &walkDirErrorFS{MapFS: fstest.MapFS{"baddir/test.go": &fstest.MapFile{Data: []byte("package main")}}},
 			},
-			sourceFS: fstest.MapFS{
-				"main.go":    &fstest.MapFile{Data: []byte("package main\nfunc main() { fmt.Println(\"Hello\") }")}, // Valid UTF-8
-				"invalid.go": &fstest.MapFile{Data: []byte{0xFF, 0xFE, 0xFD}},                                       // Invalid UTF-8 - should be skipped
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Only valid UTF-8 files processed",
-			expectedPoints: 20.0, // 100/100 * 20, only main.go should be processed
+			want: want{name: "Quality", errContain: "simulated walk error"},
 		},
 		{
-			name:         "WalkDirErrorTest",
-			instructions: "Test WalkDir error handling",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 80,
-					Feedback:     "Files processed",
-				},
-				EvaluateError: nil,
+			name: "SingleFileSuccess",
+			args: args{
+				instructions: "Simple single file test",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 100, Feedback: "Perfect code"}},
+				sourceFS:     fstest.MapFS{"perfect.go": &fstest.MapFile{Data: []byte("package main\n\n// Perfect Go code\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}")}},
 			},
-			sourceFS: &walkDirErrorFS{
-				MapFS: fstest.MapFS{
-					"baddir/test.go": &fstest.MapFile{Data: []byte("package main")}, // This will trigger walkDirErrorFS error
-				},
-			},
-			expectedName:  "Quality",
-			expectedError: "simulated walk error",
+			want: want{name: "Quality", noteContain: "Perfect code", points: 20.0},
 		},
 		{
-			name:         "SingleFileSuccess",
-			instructions: "Simple single file test",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 100,
-					Feedback:     "Perfect code",
-				},
-				EvaluateError: nil,
+			name: "RealWalkError",
+			args: args{
+				instructions: "Test with actual walk directory error",
+				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Good code"}},
+				sourceFS:     &realWalkErrorFS{MapFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}}, causeBrokenWalk: true},
 			},
-			sourceFS: fstest.MapFS{
-				"perfect.go": &fstest.MapFile{Data: []byte("package main\n\n// Perfect Go code\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}")},
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Perfect code",
-			expectedPoints: 20.0, // 100/100 * 20
-		},
-		{
-			name:         "RealWalkError",
-			instructions: "Test with actual walk directory error",
-			mockClient: &MockQualityServiceClient{
-				EvaluateResponse: &pb.EvaluateCodeQualityResponse{
-					QualityScore: 90,
-					Feedback:     "Good code",
-				},
-				EvaluateError: nil,
-			},
-			sourceFS: &realWalkErrorFS{
-				MapFS: fstest.MapFS{
-					"main.go": &fstest.MapFile{Data: []byte("package main")},
-				},
-				causeBrokenWalk: true,
-			},
-			expectedName:   "Quality",
-			expectedNote:   "Failed to prepare code for review:",
-			expectedPoints: 0, // Directory read error should result in 0 points
+			want: want{name: "Quality", errContain: "Failed to prepare code for review:", points: 0},
 		},
 	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			evaluator := rubrics.EvaluateQuality(tt.mockClient, tt.sourceFS, tt.instructions)
-			result := evaluator(t.Context(), &mockProgramRunner{}, rubrics.RunBag{})
+	for _, tc := range tests {
+		// capture
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if tc.setup != nil {
+				tc.setup(t)
+			}
 
-			if tt.expectedError != "" {
-				// For error cases, check that the note contains the error
-				assert.Contains(t, result.Note, tt.expectedError)
-				assert.Equal(t, 0.0, result.Awarded) // Error cases should have 0 points
+			evaluator := rubrics.EvaluateQuality(tc.args.mockClient, tc.args.sourceFS, tc.args.instructions)
+			got := evaluator(t.Context(), &mockProgramRunner{}, rubrics.RunBag{})
+
+			if tc.want.errContain != "" {
+				require.Contains(t, got.Note, tc.want.errContain)
+				require.Equal(t, 0.0, got.Awarded)
 			} else {
-				assert.Equal(t, tt.expectedPoints, result.Awarded)
-				assert.Contains(t, result.Note, tt.expectedNote)
+				require.InDelta(t, tc.want.points, got.Awarded, 0.0001)
+				require.Contains(t, got.Note, tc.want.noteContain)
+			}
+
+			if tc.verify != nil {
+				tc.verify(t, got)
 			}
 		})
 	}

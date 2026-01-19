@@ -174,7 +174,16 @@ func (cfg *Config) UploadResult(ctx context.Context, result *rubrics.Result) err
 		return nil
 	}
 
-	if !PromptForSubmission(ctx, cfg.Writer, cfg.Reader) {
+	// Use explicit defaults for writer/reader here so callers must pass them when desired.
+	w := cfg.Writer
+	if w == nil {
+		w = os.Stdout
+	}
+	r := cfg.Reader
+	if r == nil {
+		r = os.Stdin
+	}
+	if !PromptForSubmission(ctx, w, r) {
 		return nil
 	}
 
@@ -213,15 +222,13 @@ func (cfg *Config) UploadResult(ctx context.Context, result *rubrics.Result) err
 
 // PromptForSubmission asks the user if they want to submit results to the server.
 // Returns true if user confirms, false otherwise.
-// Uses the provided writer for prompts, or os.Stdout if writer is nil.
-// Uses the provided reader for input, or os.Stdin if reader is nil.
+// The caller must pass a non-nil writer and reader; this function will not default them.
+// If either the writer or reader is nil, the function will log a warning and return false.
 // Accepts "y", "Y", "yes", "YES" (case-insensitive, whitespace-trimmed).
 func PromptForSubmission(ctx context.Context, w io.Writer, r io.Reader) bool {
-	if w == nil {
-		w = os.Stdout
-	}
-	if r == nil {
-		r = os.Stdin
+	if w == nil || r == nil {
+		contextlog.From(ctx).WarnContext(ctx, "PromptForSubmission called with nil writer or reader")
+		return false
 	}
 
 	fmt.Fprintf(w, "\nSubmit results to server? (y/n): ")

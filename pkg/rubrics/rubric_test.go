@@ -42,12 +42,10 @@ func TestResult_ToTable(t *testing.T) {
 		name         string
 		submissionID string
 		items        []r.RubricItem
-		useNilWriter bool
 	}{
-		{name: "empty", submissionID: "s1", items: nil, useNilWriter: false},
-		{name: "single", submissionID: "s2", items: []r.RubricItem{{Name: "A", Note: "ok", Points: 5}}, useNilWriter: false},
-		{name: "multiple", submissionID: "s3", items: []r.RubricItem{{Name: "A", Note: "ok", Points: 3}, {Name: "B", Note: "also", Points: 7}}, useNilWriter: false},
-		{name: "nil_writer_uses_stdout", submissionID: "s4", items: []r.RubricItem{{Name: "C", Note: "test", Points: 10}}, useNilWriter: true},
+		{name: "empty", submissionID: "s1", items: nil},
+		{name: "single", submissionID: "s2", items: []r.RubricItem{{Name: "A", Note: "ok", Points: 5}}},
+		{name: "multiple", submissionID: "s3", items: []r.RubricItem{{Name: "A", Note: "ok", Points: 3}, {Name: "B", Note: "also", Points: 7}}},
 	}
 
 	for _, tt := range tests {
@@ -56,25 +54,17 @@ func TestResult_ToTable(t *testing.T) {
 			res := &r.Result{SubmissionID: tt.submissionID, Rubric: tt.items}
 
 			var buf bytes.Buffer
-			var out string
-			if tt.useNilWriter {
-				res.Render(nil) // Should use os.Stdout
-			} else {
-				res.Render(&buf)
-				out = buf.String()
-			}
+			res.Render(&buf)
+			out := buf.String()
 
-			if !tt.useNilWriter {
-				for _, it := range tt.items {
-					if !strings.Contains(out, it.Name) {
-						t.Fatalf("output missing item name %q: %s", it.Name, out)
-					}
-				}
-				if !strings.Contains(out, tt.submissionID) {
-					t.Fatalf("output missing SubmissionID %q: %s", tt.submissionID, out)
+			for _, it := range tt.items {
+				if !strings.Contains(out, it.Name) {
+					t.Fatalf("output missing item name %q: %s", it.Name, out)
 				}
 			}
-			// nil writer case - just verify it doesn't panic (output goes to stdout)
+			if !strings.Contains(out, tt.submissionID) {
+				t.Fatalf("output missing SubmissionID %q: %s", tt.submissionID, out)
+			}
 		})
 	}
 }

@@ -45,36 +45,55 @@ const (
 
 // ClientIP extracts client IP from any object that implements IPExtractable
 func ClientIP(ctx context.Context, req IPExtractable) string {
-	// Method 1: Try to get from context (set by StoreRealIP middleware)
-	if realIP, ok := ctx.Value(RealIPKey).(string); ok && realIP != "" && realIP != UnknownIP {
-		return realIP
+	if ip, ok := ipFromContext(ctx); ok {
+		return ip
+	}
+	if ip, ok := ipFromHeaders(req.Header()); ok {
+		return ip
+	}
+	if ip, ok := ipFromPeer(req.Peer()); ok {
+		return ip
 	}
 
-	// Method 2: Try to extract from HTTP headers
-	headers := req.Header()
-	if xff := headers.Get(XFFHeader); xff != "" {
+	return UnknownIP
+}
+
+// ipFromContext tries to read the real IP from context
+func ipFromContext(ctx context.Context) (string, bool) {
+	if realIP, ok := ctx.Value(RealIPKey).(string); ok && realIP != "" && realIP != UnknownIP {
+		return realIP, true
+	}
+
+	return "", false
+}
+
+// ipFromHeaders extracts a candidate IP from common headers
+func ipFromHeaders(h http.Header) (string, bool) {
+	if xff := h.Get(XFFHeader); xff != "" {
 		if ips := strings.Split(xff, ","); len(ips) > 0 {
 			if ip := strings.TrimSpace(ips[0]); ip != "" && ip != UnknownIP {
-				return ip
+				return ip, true
 			}
 		}
 	}
-	if ip := headers.Get(XRealIPHeader); ip != "" && ip != UnknownIP {
-		return ip
+	if ip := h.Get(XRealIPHeader); ip != "" && ip != UnknownIP {
+		return ip, true
 	}
-	if ip := headers.Get(CFConnectingIPHeader); ip != "" && ip != UnknownIP {
-		return ip
-	}
-
-	// Method 3: Try peer info as fallback
-	peer := req.Peer()
-	if peer.Addr != "" {
-		if ip, _, err := net.SplitHostPort(peer.Addr); err == nil {
-			return ip
-		}
-		return peer.Addr
+	if ip := h.Get(CFConnectingIPHeader); ip != "" && ip != UnknownIP {
+		return ip, true
 	}
 
-	// No methods worked.
-	return UnknownIP
+	return "", false
+}
+
+// ipFromPeer extracts IP from peer info
+func ipFromPeer(peer connect.Peer) (string, bool) {
+	if peer.Addr == "" {
+		return "", false
+	}
+	if ip, _, err := net.SplitHostPort(peer.Addr); err == nil {
+		return ip, true
+	}
+
+	return peer.Addr, true
 }

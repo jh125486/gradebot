@@ -19,9 +19,9 @@ type Service struct {
 	CommandBuilder rubrics.CommandBuilder
 }
 
-// NewService creates a new Service with default implementations.
+// New creates a new Service with default implementations.
 // buildID is used for the Authorization header in the HTTP client.
-func NewService(id string) *Service {
+func New(id string) *Service {
 	return &Service{
 		Client: &http.Client{
 			Timeout:   30 * time.Second,

@@ -399,7 +399,7 @@ func TestStart_ServerLifecycle(t *testing.T) {
 		setupCtx   func() (context.Context, context.CancelFunc)
 		port       string
 		wantErr    bool
-		verifyFunc func(t *testing.T, ctx context.Context, port string)
+		verifyFunc func(t *testing.T, port string)
 	}{
 		{
 			name: "server_starts_and_handles_requests",
@@ -408,7 +408,7 @@ func TestStart_ServerLifecycle(t *testing.T) {
 			},
 			port:    "0", // Use random port
 			wantErr: false,
-			verifyFunc: func(t *testing.T, ctx context.Context, port string) {
+			verifyFunc: func(t *testing.T, port string) {
 				// Give server time to start
 				time.Sleep(100 * time.Millisecond)
 			},
@@ -453,7 +453,7 @@ func TestStart_ServerLifecycle(t *testing.T) {
 			}
 
 			if tt.verifyFunc != nil {
-				tt.verifyFunc(t, ctx, tt.port)
+				tt.verifyFunc(t, tt.port)
 			}
 		})
 	}

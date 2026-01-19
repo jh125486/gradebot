@@ -59,7 +59,7 @@ Gradebot provides a `cli` package to help structure command-line tools using [Ko
 
 ```go
 // 1. Create a service container for dependencies
-svc := cli.NewService(buildID)
+svc := cli.New(buildID)
 
 // 2. Bind the service when parsing Kong arguments
 // Note: cli.CommonArgs can be embedded in commands to get standard project grading flags
@@ -88,7 +88,6 @@ Course-specific implementations should:
 
 ## Examples
 
-- A short example for `cli.NewService` is available in the package docs (it will appear as `ExampleNewService` on pkg.go.dev).
 - For runnable examples of grading workflows, see the `client` and `rubrics` packages and the unit tests for usage patterns.
 
 ## Creating a downstream grader (quickstart)

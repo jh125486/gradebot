@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestNewService(t *testing.T) {
+func TestNew(t *testing.T) {
 	t.Parallel()
 
 	type args struct {
@@ -37,7 +37,7 @@ func TestNewService(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			svc := cli.NewService(tt.args.buildID)
+			svc := cli.New(tt.args.buildID)
 
 			require.NotNil(t, svc)
 			require.NotNil(t, svc.Client, "Client should be initialized")
