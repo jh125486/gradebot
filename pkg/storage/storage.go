@@ -22,16 +22,18 @@ type ListResultsParams struct {
 
 // Validate normalizes and validates pagination parameters.
 // Returns a normalized copy with defaults applied and bounds enforced.
-func (p ListResultsParams) Validate() ListResultsParams {
+func (p *ListResultsParams) Validate() {
 	if p.Page < 1 {
 		p.Page = 1
 	}
-	if p.PageSize < 1 {
+	switch {
+	case p.PageSize < 1:
 		p.PageSize = DefaultPageSize
-	} else if p.PageSize > MaxPageSize {
+	case p.PageSize > MaxPageSize:
 		p.PageSize = MaxPageSize
+	default:
+		// nop
 	}
-	return p
 }
 
 // CalculatePaginationBounds computes start and end indices for pagination
@@ -48,6 +50,10 @@ func (p ListResultsParams) CalculatePaginationBounds(totalCount int) (startIdx, 
 	}
 
 	return startIdx, endIdx
+}
+
+func (p ListResultsParams) Offset() int {
+	return (p.Page - 1) * p.PageSize
 }
 
 // Storage defines the interface for persistent storage of rubric results

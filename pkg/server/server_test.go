@@ -117,7 +117,7 @@ func (m *mockStorage) ListResultsPaginated(ctx context.Context, params storage.L
 	return results, totalCount, nil
 }
 
-func (m *mockStorage) ListProjects(ctx context.Context) ([]string, error) {
+func (m *mockStorage) ListProjects(_ context.Context) ([]string, error) {
 	if m.failListProjects {
 		return nil, errors.New("mock list projects error")
 	}
