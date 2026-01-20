@@ -214,52 +214,52 @@ func (s *SQLStorage) ListResultsPaginated(
 ) (results map[string]*proto.Result, totalCount int, err error) {
 	start := time.Now()
 
-	// Validate and normalize parameters
-	params = params.Validate()
+	params.Validate()
 
-	// Build WHERE clause for project filter
-	var whereClause string
-	var args []any
-	argIndex := 1
+	offset := params.Offset()
 
+	// Build query and args based on project filter
+	const (
+		listWithProjectQ = `
+			SELECT 
+				submission_id, 
+				result,
+				COUNT(*) OVER() as total_count
+			FROM submissions
+			WHERE project = $1
+			ORDER BY uploaded_at DESC 
+			LIMIT $2 OFFSET $3
+		`
+		listAllQ = `
+			SELECT 
+				submission_id, 
+				result,
+				COUNT(*) OVER() as total_count
+			FROM submissions
+			ORDER BY uploaded_at DESC 
+			LIMIT $1 OFFSET $2
+		`
+	)
+
+	var (
+		q    string
+		args []any
+	)
 	if params.Project != "" {
-		whereClause = " WHERE project = $" + fmt.Sprintf("%d", argIndex)
-		args = append(args, params.Project)
-		argIndex++
+		q = listWithProjectQ
+		args = []any{params.Project, params.PageSize, offset}
+	} else {
+		q = listAllQ
+		args = []any{params.PageSize, offset}
 	}
 
-	// Get total count
-	countQ := "SELECT COUNT(*) FROM submissions" + whereClause
-	countArgs := args
-	if err = s.db.QueryRowContext(ctx, countQ, countArgs...).Scan(&totalCount); err != nil {
-		return nil, 0, fmt.Errorf("failed to count submissions: %w", err)
-	}
-
-	// If no results, return empty map
-	if totalCount == 0 {
-		return make(map[string]*proto.Result), 0, nil
-	}
-
-	// Calculate offset
-	offset := (params.Page - 1) * params.PageSize
-
-	// Fetch paginated results, ordered by uploaded_at DESC (newest first)
-	//nolint:gosec // whereClause and argIndex are not user input, safe SQL formatting
-	q := fmt.Sprintf(`
-		SELECT submission_id, result 
-		FROM submissions%s 
-		ORDER BY uploaded_at DESC 
-		LIMIT $%d OFFSET $%d
-	`, whereClause, argIndex, argIndex+1)
-
-	args = append(args, params.PageSize, offset)
 	rows, err := s.db.QueryContext(ctx, q, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to query submissions: %w", err)
 	}
 	defer rows.Close()
 
-	results = make(map[string]*proto.Result)
+	results = make(map[string]*proto.Result, params.PageSize)
 	unmarshaler := protojson.UnmarshalOptions{
 		DiscardUnknown: true,
 	}
@@ -268,9 +268,15 @@ func (s *SQLStorage) ListResultsPaginated(
 	for rows.Next() {
 		var submissionID string
 		var resultJSON []byte
-		if err := rows.Scan(&submissionID, &resultJSON); err != nil {
+		var rowTotalCount int
+		if err := rows.Scan(&submissionID, &resultJSON, &rowTotalCount); err != nil {
 			logger.WarnContext(ctx, "Failed to scan row", slog.Any("error", err))
 			continue
+		}
+
+		// Capture total count from first row (same for all rows due to window function)
+		if totalCount == 0 {
+			totalCount = rowTotalCount
 		}
 
 		var result proto.Result
@@ -311,7 +317,6 @@ func (s *SQLStorage) ListProjects(ctx context.Context) ([]string, error) {
 		WHERE project IS NOT NULL AND project != '' 
 		ORDER BY project
 	`
-
 	rows, err := s.db.QueryContext(ctx, q)
 	if err != nil {
 		return nil, fmt.Errorf("failed to query projects: %w", err)

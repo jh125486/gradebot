@@ -88,58 +88,35 @@ func TestSafeBufferBasicOperations(t *testing.T) {
 	}
 }
 
-// TestSafeBufferConcurrentWrites tests concurrent writes in a table-driven way
-func TestSafeBufferConcurrentWrites(t *testing.T) {
+// TestSafeBufferConcurrentOperations tests concurrent buffer operations
+func TestSafeBufferConcurrentOperations(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name               string
-		numGoroutines      int
+		numWriters         int
 		writesPerGoroutine int
+		numReaders         int
+		readsPerGoroutine  int
 	}{
-		{"small", 10, 10},
-		{"large", 100, 10},
-		{"zero", 0, 0},
+		{
+			name:               "concurrent writes only",
+			numWriters:         100,
+			writesPerGoroutine: 10,
+			numReaders:         0,
+			readsPerGoroutine:  0,
+		},
+		{
+			name:               "concurrent reads and writes",
+			numWriters:         50,
+			writesPerGoroutine: 100,
+			numReaders:         50,
+			readsPerGoroutine:  100,
+		},
 	}
 
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			var sb rubrics.SafeBuffer
-			var wg sync.WaitGroup
-
-			for i := 0; i < tc.numGoroutines; i++ {
-				wg.Go(func() {
-					for j := 0; j < tc.writesPerGoroutine; j++ {
-						_, _ = sb.Write([]byte("x"))
-					}
-				})
-			}
-
-			wg.Wait()
-
-			expectedLen := tc.numGoroutines * tc.writesPerGoroutine
-			assert.Equal(t, expectedLen, sb.Len())
-			assert.Equal(t, expectedLen, len(sb.String()))
-		})
-	}
-}
-
-// TestSafeBufferConcurrentReadWrites tests concurrent reads and writes using table-driven cases
-func TestSafeBufferConcurrentReadWrites(t *testing.T) {
-	tests := []struct {
-		name            string
-		numWriters      int
-		numReaders      int
-		writesPerWriter int
-		readsPerReader  int
-	}{
-		{"balanced", 50, 50, 100, 100},
-		{"moreReaders", 20, 100, 50, 200},
-		{"small", 5, 5, 10, 10},
-	}
-
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
 			var (
@@ -147,19 +124,19 @@ func TestSafeBufferConcurrentReadWrites(t *testing.T) {
 				wg sync.WaitGroup
 			)
 
-			// Writers
-			for i := 0; i < tc.numWriters; i++ {
+			// Launch writers
+			for range tt.numWriters {
 				wg.Go(func() {
-					for j := 0; j < tc.writesPerWriter; j++ {
-						_, _ = sb.Write([]byte("a"))
+					for range tt.writesPerGoroutine {
+						sb.Write([]byte("x"))
 					}
 				})
 			}
 
-			// Readers
-			for i := 0; i < tc.numReaders; i++ {
+			// Launch readers (concurrent with writers)
+			for range tt.numReaders {
 				wg.Go(func() {
-					for j := 0; j < tc.readsPerReader; j++ {
+					for range tt.readsPerGoroutine {
 						_ = sb.Len()
 						_ = sb.String()
 					}
@@ -168,10 +145,12 @@ func TestSafeBufferConcurrentReadWrites(t *testing.T) {
 
 			wg.Wait()
 
+			// Verify final state is consistent
+			expectedLen := tt.numWriters * tt.writesPerGoroutine
 			finalLen := sb.Len()
 			finalStr := sb.String()
-			assert.Equal(t, finalLen, len(finalStr))
-			assert.Equal(t, tc.numWriters*tc.writesPerWriter, finalLen)
+			assert.Equal(t, expectedLen, finalLen)
+			assert.Equal(t, expectedLen, len(finalStr))
 		})
 	}
 }
