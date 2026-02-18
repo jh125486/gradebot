@@ -28,12 +28,13 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
+	buildID := os.Getenv("BUILD_ID")
 	ctx = contextlog.New(ctx, os.Getenv("LOG_LEVEL"),
+		slog.String("buildID", buildID),
 		slog.String("version", version),
 		slog.String("commit", commit),
 		slog.String("built", date))
 
-	buildID := os.Getenv("BUILD_ID")
 	var app cli.CLI
 	if err := basecli.NewKongContext(ctx, "gradebot", buildID, version, &app, os.Args[1:]).
 		Run(ctx); err != nil {
