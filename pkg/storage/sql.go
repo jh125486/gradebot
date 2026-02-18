@@ -73,7 +73,7 @@ func NewSQLStorage(ctx context.Context, connStr string) (*SQLStorage, error) {
 // Supports both URL format (returns key=value pairs) and DSN format (user=... host=... dbname=...).
 func parseConnConfig(configStr string) (host, dbname string) {
 	// Try URL format first (postgresql://...)
-	config, err := pq.ParseURL(configStr)
+	config, err := pq.ParseURL(configStr) //nolint:staticcheck // pq.ParseURL is used to parse connection URL into DSN format
 	if err != nil {
 		// For DSN format (user=... host=... dbname=...), parse manually
 		config = configStr

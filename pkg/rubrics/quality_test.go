@@ -138,8 +138,8 @@ func (m *MockQualityServiceClient) EvaluateCodeQuality(ctx context.Context, req 
 // mockProgramRunner is a mock for testing
 type mockProgramRunner struct{}
 
-func (m *mockProgramRunner) Path() string             { return "" }
-func (m *mockProgramRunner) Run(args ...string) error { return nil }
+func (m *mockProgramRunner) Path() string                         { return "" }
+func (m *mockProgramRunner) Run(context.Context, ...string) error { return nil }
 func (m *mockProgramRunner) Do(stdin string) (stdout, stderr []string, err error) {
 	return nil, nil, nil
 }

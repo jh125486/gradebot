@@ -21,6 +21,9 @@ func TestNewKongContext(t *testing.T) {
 		ctx     context.Context
 		name    string
 		buildID string
+		version string
+		commit  string
+		date    string
 		cli     any
 	}
 	tests := []struct {
@@ -33,6 +36,9 @@ func TestNewKongContext(t *testing.T) {
 				ctx:     t.Context(),
 				name:    "test-app",
 				buildID: "some-build-id",
+				version: "v1.0.0",
+				commit:  "commit_1",
+				date:    "2023-01-01",
 				cli: &struct {
 					Help bool `help:"Show help"`
 				}{},
@@ -44,6 +50,9 @@ func TestNewKongContext(t *testing.T) {
 				ctx:     context.WithValue(t.Context(), contextKey("test-key"), "test-value"),
 				name:    "gradebot",
 				buildID: "v1.2.3",
+				version: "v1.2.3",
+				commit:  "commit_2",
+				date:    "2023-01-02",
 				cli: &struct {
 					Version bool `help:"Show version"`
 				}{},
@@ -55,6 +64,9 @@ func TestNewKongContext(t *testing.T) {
 				ctx:     t.Context(),
 				name:    "",
 				buildID: "",
+				version: "dev",
+				commit:  "none",
+				date:    "unknown",
 				cli:     &struct{}{},
 			},
 		},
@@ -64,6 +76,9 @@ func TestNewKongContext(t *testing.T) {
 				ctx:     t.Context(),
 				name:    "test",
 				buildID: "my-build-id",
+				version: "v1.0.0",
+				commit:  "commit_hash",
+				date:    "2023-01-01",
 				cli:     &struct{}{},
 			},
 		},
@@ -73,6 +88,9 @@ func TestNewKongContext(t *testing.T) {
 				ctx:     t.Context(),
 				name:    "test",
 				buildID: "",
+				version: "v1.0.0",
+				commit:  "none",
+				date:    "unknown",
 				cli:     &struct{}{},
 			},
 		},
@@ -83,7 +101,7 @@ func TestNewKongContext(t *testing.T) {
 			t.Parallel()
 
 			// Pass empty args to avoid parsing test flags from os.Args
-			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.buildID, tt.args.cli, []string{},
+			kctx := cli.NewKongContext(tt.args.ctx, tt.args.name, tt.args.version, tt.args.commit, tt.args.date, tt.args.cli, []string{},
 				kong.Exit(func(int) {}),
 				kong.Writers(io.Discard, io.Discard),
 			)
@@ -148,14 +166,14 @@ func TestNewKongContext_ErrorPaths(t *testing.T) {
 
 			if tt.wantPanic {
 				assert.Panics(t, func() {
-					cli.NewKongContext(t.Context(), "test", "", tt.args.cli, tt.args.args,
-						kong.Exit(func(int) {}),
+					cli.NewKongContext(t.Context(), "test", "", "v1.0.0", "date", tt.args.cli, tt.args.args,
+						kong.Exit(func(code int) { panic(code) }),
 						kong.Writers(io.Discard, io.Discard),
 					)
 				})
 			} else {
 				assert.NotPanics(t, func() {
-					kctx := cli.NewKongContext(t.Context(), "test", "", tt.args.cli, tt.args.args,
+					kctx := cli.NewKongContext(t.Context(), "test", "", "v1.0.0", "date", tt.args.cli, tt.args.args,
 						kong.Exit(func(int) {}),
 						kong.Writers(io.Discard, io.Discard),
 					)

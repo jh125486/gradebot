@@ -43,13 +43,15 @@ var (
 type HTMLHandler struct {
 	storage   storage.Storage
 	templates *TemplateManager
+	version   string
 }
 
 // NewHTMLHandler creates a new HTML handler
-func NewHTMLHandler(stor storage.Storage) *HTMLHandler {
+func NewHTMLHandler(stor storage.Storage, version string) *HTMLHandler {
 	return &HTMLHandler{
 		storage:   stor,
 		templates: NewTemplateManager(),
+		version:   version,
 	}
 }
 
@@ -109,6 +111,7 @@ type RubricItemData struct {
 // SubmissionsPageData contains all data needed to render the submissions overview page,
 // including pagination information, submission details, and score statistics.
 type SubmissionsPageData struct {
+	Version          string
 	Project          string
 	TotalSubmissions int
 	HighScore        float64
@@ -122,6 +125,7 @@ type SubmissionsPageData struct {
 
 // IndexPageData contains the list of projects for the index page
 type IndexPageData struct {
+	Version  string
 	Projects []string
 }
 
@@ -129,6 +133,7 @@ type (
 	// Config contains the configuration required to start the server.
 	Config struct {
 		ID           string
+		Version      string
 		Port         string
 		OpenAIClient openai.Reviewer
 		Storage      storage.Storage
@@ -184,7 +189,7 @@ func RootHandler(w http.ResponseWriter, r *http.Request, h *HTMLHandler) {
 // serves embedded HTML pages for viewing submissions, and provides a health check endpoint.
 // The server is configured with TLS 1.2 for corporate proxy compatibility.
 // It gracefully shuts down on context cancellation or when the listener returns an error.
-func Start(ctx context.Context, cfg Config) error {
+func Start(ctx context.Context, cfg *Config) error {
 	contextlog.From(ctx).InfoContext(ctx, "Server will start on port", slog.String("port", cfg.Port))
 	var lc net.ListenConfig
 	lis, err := lc.Listen(ctx, "tcp", ":"+cfg.Port)
@@ -201,7 +206,7 @@ func Start(ctx context.Context, cfg Config) error {
 	rubricPath, rubricHandler := protoconnect.NewRubricServiceHandler(rubricServer)
 
 	// Create HTML handler for web pages
-	htmlHandler := NewHTMLHandler(cfg.Storage)
+	htmlHandler := NewHTMLHandler(cfg.Storage, cfg.Version)
 
 	// Create a multiplexer to handle both services
 	mux := http.NewServeMux()
@@ -218,7 +223,7 @@ func Start(ctx context.Context, cfg Config) error {
 	// Health check endpoint for Koyeb and monitoring
 	mux.Handle("/health", mw.RequestID(mw.Logging(http.HandlerFunc(HealthHandler))))
 	srv := &http.Server{
-		Handler:           mux,
+		Handler:           mw.VersionMiddleware(cfg.Version)(mux),
 		ReadHeaderTimeout: 10 * time.Second, // Prevent Slowloris attacks
 		TLSConfig:         tlsConfig(),
 	}
@@ -330,6 +335,7 @@ func ServeIndexPage(w http.ResponseWriter, r *http.Request, h *HTMLHandler) {
 	}
 
 	data := IndexPageData{
+		Version:  h.version,
 		Projects: projects,
 	}
 
@@ -407,6 +413,7 @@ func serveProjectSubmissionsPage(w http.ResponseWriter, r *http.Request, project
 	}
 
 	data := SubmissionsPageData{
+		Version:          h.version,
 		Project:          project,
 		TotalSubmissions: totalCount,
 		HighScore:        highScore,
@@ -505,6 +512,7 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, project, 
 	}
 
 	data := struct {
+		Version       string
 		SubmissionID  string
 		Project       string
 		Timestamp     time.Time
@@ -515,6 +523,7 @@ func serveSubmissionDetailPage(w http.ResponseWriter, r *http.Request, project, 
 		GeoLocation   string
 		Rubric        []RubricItemData
 	}{
+		Version:       h.version,
 		SubmissionID:  result.SubmissionId,
 		Project:       result.Project,
 		Timestamp:     timestamp,

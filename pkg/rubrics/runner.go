@@ -3,7 +3,6 @@ package rubrics
 import (
 	"context"
 	"io"
-	"os"
 	"os/exec"
 )
 
@@ -12,6 +11,7 @@ import (
 type (
 	Commander interface {
 		SetDir(dir string)
+		SetEnv(env []string)
 		StreamSetter
 
 		// Start begins execution without waiting for completion.
@@ -27,11 +27,6 @@ type (
 	}
 )
 
-// CommandBuilder defines an interface for creating new commands.
-type CommandBuilder interface {
-	New(name string, arg ...string) Commander
-}
-
 // execCmd is the production implementation of Commander, wrapping exec.Cmd.
 type execCmd struct {
 	*exec.Cmd
@@ -39,6 +34,10 @@ type execCmd struct {
 
 func (c *execCmd) SetDir(dir string) {
 	c.Dir = dir
+}
+
+func (c *execCmd) SetEnv(env []string) {
+	c.Env = env
 }
 
 func (c *execCmd) SetStdin(stdin io.Reader) {
@@ -73,35 +72,35 @@ func (c *execCmd) Run() error {
 	return c.Cmd.Run()
 }
 
-// ExecCommandBuilder is the production implementation of CommandBuilder.
-// It is used internally by Program to create executable commands.
-type ExecCommandBuilder struct {
-	context.Context
-	Env map[string]string
-}
-
-// New creates a new execCmd wrapper.
-func (b *ExecCommandBuilder) New(name string, arg ...string) Commander {
-	cmd := exec.CommandContext(b.Context, name, arg...)
-
-	// Set environment variables if provided
-	if len(b.Env) > 0 {
-		env := os.Environ()
-		for key, value := range b.Env {
-			env = append(env, key+"="+value)
-		}
-		cmd.Env = env
-	}
-
-	return &execCmd{Cmd: cmd}
-}
-
 // ProgramRunner is the interface used by rubrics to run student programs.
 // It is declared here so runner-related abstractions live together.
 type ProgramRunner interface {
 	Path() string
-	Run(args ...string) error
+	Run(ctx context.Context, args ...string) error
 	Do(in string) (stdout, stderr []string, err error)
 	Kill() error
 	Cleanup(ctx context.Context) error
+}
+
+// ExecCommandBuilder creates Commander instances with context and environment settings.
+// It is used to factory Commander instances for program execution.
+type ExecCommandBuilder struct {
+	Context context.Context
+	Env     map[string]string
+}
+
+// New creates a new Commander with the configured context and environment.
+func (b *ExecCommandBuilder) New(name string, args ...string) Commander {
+	cmd := exec.CommandContext(b.Context, name, args...)
+	execCmd := &execCmd{Cmd: cmd}
+
+	if b.Env != nil {
+		var env []string
+		for k, v := range b.Env {
+			env = append(env, k+"="+v)
+		}
+		execCmd.SetEnv(env)
+	}
+
+	return execCmd
 }

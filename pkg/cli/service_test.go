@@ -37,7 +37,7 @@ func TestNew(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			svc := cli.New(tt.args.buildID)
+			svc := cli.New(tt.args.buildID, "v1.0.0")
 
 			require.NotNil(t, svc)
 			require.NotNil(t, svc.Client, "Client should be initialized")
@@ -46,6 +46,7 @@ func TestNew(t *testing.T) {
 
 			assert.NotNil(t, svc.Stdin, "Stdin should be initialized")
 			assert.NotNil(t, svc.Stdout, "Stdout should be initialized")
+			assert.Equal(t, "v1.0.0", svc.Version, "Version should be set")
 		})
 	}
 }

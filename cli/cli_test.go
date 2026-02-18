@@ -236,9 +236,10 @@ func TestServerCmd_Run(t *testing.T) {
 			defer cancel()
 
 			buildID := basecli.BuildID("test-build-id-12345")
+			version := basecli.Version("v1.0.0")
 			appCtx := basecli.Context{Context: ctx}
 
-			err := cmd.Run(appCtx, buildID)
+			err := cmd.Run(appCtx, buildID, version)
 			if tt.wantErr {
 				assert.Error(t, err)
 			} else {

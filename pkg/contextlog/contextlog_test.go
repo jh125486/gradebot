@@ -149,6 +149,7 @@ func TestNew(t *testing.T) {
 
 	type args struct {
 		rawLevel string
+		attrs    []slog.Attr
 	}
 	tests := []struct {
 		name string
@@ -178,6 +179,26 @@ func TestNew(t *testing.T) {
 			name: "empty string defaults to info",
 			args: args{rawLevel: ""},
 		},
+		{
+			name: "with attributes",
+			args: args{
+				rawLevel: "info",
+				attrs: []slog.Attr{
+					slog.String("version", "1.0.0"),
+					slog.String("commit", "abc123"),
+					slog.String("built", "2024-01-01"),
+				},
+			},
+		},
+		{
+			name: "with single attribute",
+			args: args{
+				rawLevel: "info",
+				attrs: []slog.Attr{
+					slog.String("service", "gradebot"),
+				},
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -185,7 +206,7 @@ func TestNew(t *testing.T) {
 			t.Parallel()
 
 			ctx := t.Context()
-			newCtx := contextlog.New(ctx, tt.args.rawLevel)
+			newCtx := contextlog.New(ctx, tt.args.rawLevel, tt.args.attrs...)
 
 			// Verify a context is returned
 			assert.NotNil(t, newCtx)
