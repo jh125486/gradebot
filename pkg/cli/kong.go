@@ -4,8 +4,11 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
+	"os"
 
 	"github.com/alecthomas/kong"
+	"github.com/jh125486/gradebot/pkg/contextlog"
 )
 
 // Context wraps context.Context to work around reflection issues in Kong's Bind().
@@ -14,24 +17,43 @@ type Context struct {
 	context.Context
 }
 
-// BuildID is a distinct type for the hashed build identifier.
-// Used for Kong binding to avoid conflicts with plain strings.
-type BuildID string
+type (
+	// BuildID is a distinct type for the hashed build identifier.
+	// Used for Kong binding to avoid conflicts with plain strings.
+	BuildID string
 
-// Version is a distinct type for the application version.
-// Used for Kong binding to track server/client version mismatches.
-type Version string
+	// Version is a distinct type for the application version.
+	// Used for Kong binding to track server/client version mismatches.
+	Version string
+)
 
 // NewKongContext creates a Kong context with required params.
-func NewKongContext(ctx context.Context, name, id, ver string, cli any, args []string, opts ...kong.Option) *kong.Context {
-	hashedID := sha256.Sum256([]byte(id))
-	buildID := hex.EncodeToString(hashedID[:])
-	svc := New(buildID, ver)
+func NewKongContext(
+	ctx context.Context,
+	name, version, commit, date string,
+	cli any,
+	args []string,
+	opts ...kong.Option,
+) *kong.Context {
+	buildID := os.Getenv("BUILD_ID")
+	ctx = contextlog.New(ctx, os.Getenv("LOG_LEVEL"),
+		slog.String("buildID", buildID),
+		slog.String("version", version),
+		slog.String("commit", commit),
+		slog.String("built", date))
+
+	hashedID := sha256.Sum256([]byte(buildID))
+	buildID = hex.EncodeToString(hashedID[:])
+	svc := New(buildID, version)
 
 	opts = append(opts,
 		kong.Name(name),
 		kong.UsageOnError(),
-		kong.Bind(Context{Context: ctx}, svc, BuildID(buildID), Version(ver)),
+		kong.Bind(Context{Context: ctx}),
+		kong.Bind(svc),
+		kong.Bind(BuildID(buildID)),
+		kong.Bind(Version(version)),
+		kong.Vars{"version": version},
 	)
 	parser, err := kong.New(cli, opts...)
 	if err != nil {
@@ -40,7 +62,7 @@ func NewKongContext(ctx context.Context, name, id, ver string, cli any, args []s
 	kctx, err := parser.Parse(args)
 	if err != nil {
 		parser.Errorf("%s", err)
-		panic(err)
+		parser.Exit(1)
 	}
 
 	return kctx

@@ -10,6 +10,7 @@ import (
 type (
 	// CLI defines the command-line interface structure for the gradebot server application.
 	CLI struct {
+		cli.BaseCLI    `embed:""`
 		Port           string `default:"8080"              env:"PORT"                                 help:"Port to listen on" name:"port"`
 		DatabaseURL    string `env:"DATABASE_URL"          help:"PostgreSQL database URL"             name:"database-url"`
 		R2Endpoint     string `env:"R2_ENDPOINT"           help:"R2/S3 endpoint URL"                  name:"r2-endpoint"`

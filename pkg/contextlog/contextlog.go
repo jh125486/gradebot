@@ -13,7 +13,9 @@ const DefaultLevel = slog.LevelInfo
 
 func New(ctx context.Context, rawLevel string, attrs ...slog.Attr) context.Context {
 	var logLevel slog.Level
-	if err := logLevel.UnmarshalText([]byte(rawLevel)); err != nil {
+	if rawLevel == "" {
+		logLevel = DefaultLevel
+	} else if err := logLevel.UnmarshalText([]byte(rawLevel)); err != nil {
 		slog.Default().WarnContext(ctx, "Invalid level, falling back to default",
 			slog.String("rawLevel", rawLevel),
 			slog.String("default", DefaultLevel.String()),
