@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"connectrpc.com/connect"
@@ -114,7 +116,7 @@ func (c *GeoLocationClient) Do(ctx context.Context, ip string) string {
 		return unknownLocation
 	}
 
-	resp, err := c.Client.Do(req)
+	resp, err := c.Client.Do(req) //nolint:gosec // Request URL is constructed from validated IP address
 	if err != nil {
 		contextlog.From(ctx).WarnContext(ctx, "Failed to fetch geo location",
 			slog.String("ip", ip),
@@ -149,8 +151,21 @@ func skipGeoLookup(ip string) bool {
 }
 
 func newGeoRequest(ip string) (*http.Request, error) {
-	url := fmt.Sprintf("http://ipapi.co/%s/json/", ip)
-	return http.NewRequestWithContext(context.Background(), http.MethodGet, url, http.NoBody)
+	// Sanitize IP for input to prevent SSRF
+	// Use net.ParseIP to ensure it's a valid IP address.
+	parsedIP := net.ParseIP(ip)
+	if parsedIP == nil {
+		return nil, fmt.Errorf("invalid IP address format")
+	}
+
+	// Use net/url to construct the URL safely
+	u := url.URL{
+		Scheme: "https",
+		Host:   "ipapi.co",
+		Path:   fmt.Sprintf("/%s/json/", parsedIP.String()),
+	}
+
+	return http.NewRequestWithContext(context.Background(), http.MethodGet, u.String(), http.NoBody)
 }
 
 func decodeGeoLocation(body io.Reader) (GeoLocation, error) {
