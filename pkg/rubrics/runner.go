@@ -95,7 +95,7 @@ func (b *ExecCommandBuilder) New(name string, args ...string) Commander {
 	execCmd := &execCmd{Cmd: cmd}
 
 	if b.Env != nil {
-		var env []string
+		env := make([]string, 0, len(b.Env))
 		for k, v := range b.Env {
 			env = append(env, k+"="+v)
 		}
