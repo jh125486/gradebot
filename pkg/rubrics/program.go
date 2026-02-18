@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -41,23 +42,29 @@ func (sb *SafeBuffer) String() string {
 	return sb.buf.String()
 }
 
+// CommandBuilder is a function that creates a Commander for executing commands.
+// It is used for dependency injection to allow for testable command execution.
+type CommandBuilder func(name string, args ...string) Commander
+
 // Program implements the ProgramRunner interface using a CommandBuilder
 // to allow for testable command execution.
 type Program struct {
-	WorkDir    string
-	RunCmd     []string
-	cmdBuilder CommandBuilder
+	workDir        string
+	runCmd         []string
+	env            []string
+	commandBuilder CommandBuilder
 
-	cmd    Commander
 	out    SafeBuffer
 	errOut SafeBuffer
 
 	inputWriter io.WriteCloser
 	inputReader io.Reader
+
+	cleanup func() error
 }
 
-// NewProgram creates a new Program instance.
-func NewProgram(workDir, runCmd string, builder CommandBuilder, opts ...func(*Program)) *Program {
+// New creates a new Program instance.
+func New(workDir, runCmd string, opts ...func(*Program)) *Program {
 	// Convert relative paths to absolute paths to avoid issues with os.Chdir
 	if absDir, err := filepath.Abs(workDir); err == nil {
 		workDir = absDir
@@ -66,17 +73,27 @@ func NewProgram(workDir, runCmd string, builder CommandBuilder, opts ...func(*Pr
 	pr, pw := io.Pipe()
 
 	p := &Program{
-		WorkDir:     workDir,
-		RunCmd:      strings.Fields(runCmd),
-		cmdBuilder:  builder,
+		workDir:     workDir,
+		runCmd:      strings.Fields(runCmd),
+		env:         os.Environ(),
 		inputReader: pr,
 		inputWriter: pw,
+		cleanup:     func() error { return nil }, // Default no-op cleanup
 	}
 
 	for _, opt := range opts {
 		opt(p)
 	}
 
+	return p
+}
+
+// NewWithCommander creates a new Program instance with a custom Commander.
+func NewWithCommander(workDir, runCmd string, commander Commander) *Program {
+	p := New(workDir, runCmd, WithCommandBuilder(func(_ string, _ ...string) Commander {
+		// Return the same commander for testing purposes
+		return commander
+	}))
 	return p
 }
 
@@ -88,11 +105,27 @@ func WithReaderWriter(reader io.Reader, writer io.WriteCloser) func(*Program) {
 	}
 }
 
+// WithEnv configures the Program to use the provided environment variables.
+func WithEnv(env map[string]string) func(*Program) {
+	return func(p *Program) {
+		for k, v := range env {
+			p.env = append(p.env, fmt.Sprintf("%s=%s", k, v))
+		}
+	}
+}
+
+// WithCommandBuilder configures the Program to use a custom command builder.
+func WithCommandBuilder(builder CommandBuilder) func(*Program) {
+	return func(p *Program) {
+		p.commandBuilder = builder
+	}
+}
+
 // Path returns the working directory path
-func (p *Program) Path() string { return p.WorkDir }
+func (p *Program) Path() string { return p.workDir }
 
 // Run starts the program with the given arguments
-func (p *Program) Run(args ...string) (err error) {
+func (p *Program) Run(ctx context.Context, args ...string) (err error) {
 	cmdName, cmdArgs := p.resolveCommand(args)
 	if cmdName == "" {
 		return fmt.Errorf("no run command configured")
@@ -108,7 +141,7 @@ func (p *Program) Run(args ...string) (err error) {
 		}
 	}()
 
-	err = p.startCommand(cmdName, cmdArgs)
+	err = p.startCommand(ctx, cmdName, cmdArgs)
 
 	return err
 }
@@ -119,7 +152,7 @@ func (p *Program) changeToWorkDir() (func() error, error) {
 		return nil, fmt.Errorf("failed to determine working directory: %w", err)
 	}
 
-	if err := os.Chdir(p.WorkDir); err != nil {
+	if err := os.Chdir(p.workDir); err != nil {
 		return nil, err
 	}
 
@@ -130,38 +163,49 @@ func (p *Program) changeToWorkDir() (func() error, error) {
 
 func (p *Program) resolveCommand(args []string) (cmdName string, cmdArgs []string) {
 	switch {
-	case len(args) == 0 && len(p.RunCmd) == 0:
+	case len(args) == 0 && len(p.runCmd) == 0:
 		return "", nil
 	case len(args) == 0:
-		return p.RunCmd[0], copyArgs(p.RunCmd[1:])
-	case len(p.RunCmd) == 0:
+		return p.runCmd[0], copyArgs(p.runCmd[1:])
+	case len(p.runCmd) == 0:
 		return args[0], copyArgs(args[1:])
 	default:
-		return p.RunCmd[0], copyArgs(args)
+		return p.runCmd[0], copyArgs(args)
 	}
 }
 
-func (p *Program) startCommand(cmdName string, cmdArgs []string) error {
-	if p.cmdBuilder == nil {
-		return nil
+func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []string) error {
+	var cmd Commander
+	if p.commandBuilder != nil {
+		cmd = p.commandBuilder(cmdName, cmdArgs...)
+	} else {
+		cmd = &execCmd{
+			Cmd: exec.CommandContext(ctx, cmdName, cmdArgs...),
+		}
+	}
+	cmd.SetDir(p.workDir)
+	cmd.SetEnv(p.env)
+	cmd.SetStdin(p.inputReader)
+	cmd.SetStdout(&p.out)
+	cmd.SetStderr(&p.errOut)
+
+	// Save cleanup function to kill process later
+	if execCmd, ok := cmd.(*execCmd); ok {
+		p.cleanup = execCmd.ProcessKill
+	} else {
+		// For mocked or custom commanders, store the commander for cleanup
+		p.cleanup = cmd.ProcessKill
 	}
 
-	p.cmd = p.cmdBuilder.New(cmdName, cmdArgs...)
-	p.cmd.SetDir(p.WorkDir)
+	if err := cmd.Start(); err != nil {
+		return err
+	}
 
-	p.cmd.SetStdin(p.inputReader)
-	p.cmd.SetStdout(&p.out)
-	p.cmd.SetStderr(&p.errOut)
-
-	return p.cmd.Start()
+	return nil
 }
 
 // Do sends input to the running program and returns captured output
 func (p *Program) Do(in string) (stdout, stderr []string, err error) {
-	if p.cmd == nil {
-		return nil, nil, nil
-	}
-
 	if err := p.sendToStdin(in); err != nil {
 		return nil, nil, err
 	}
@@ -184,7 +228,7 @@ func (p *Program) sendToStdin(in string) error {
 }
 
 func (p *Program) waitForOutput(prevOutLen, prevErrLen int) {
-	if p.inputWriter == nil || p.cmd == nil {
+	if p.inputWriter == nil {
 		return
 	}
 
@@ -235,10 +279,7 @@ func copyArgs(src []string) []string {
 
 // Kill terminates the running program process
 func (p *Program) Kill() error {
-	if p.cmd != nil {
-		return p.cmd.ProcessKill()
-	}
-	return nil
+	return p.cleanup()
 }
 
 // Cleanup prepares the program environment for a fresh run by removing

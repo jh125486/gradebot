@@ -11,7 +11,7 @@ type loggerKey struct{}
 
 const DefaultLevel = slog.LevelInfo
 
-func New(ctx context.Context, rawLevel string) context.Context {
+func New(ctx context.Context, rawLevel string, attrs ...slog.Attr) context.Context {
 	var logLevel slog.Level
 	if err := logLevel.UnmarshalText([]byte(rawLevel)); err != nil {
 		slog.Default().WarnContext(ctx, "Invalid level, falling back to default",
@@ -25,6 +25,15 @@ func New(ctx context.Context, rawLevel string) context.Context {
 	l := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
 		Level: logLevel,
 	}))
+
+	if len(attrs) > 0 {
+		anyAttrs := make([]any, len(attrs))
+		for i := range attrs {
+			anyAttrs[i] = attrs[i]
+		}
+		l = l.With(anyAttrs...)
+	}
+
 	slog.SetDefault(l)
 
 	return With(ctx, l)

@@ -16,18 +16,20 @@ type Service struct {
 	Client         *http.Client
 	Stdin          io.Reader
 	Stdout         io.Writer
+	Version        string
 	CommandBuilder rubrics.CommandBuilder
 }
 
 // New creates a new Service with default implementations.
 // buildID is used for the Authorization header in the HTTP client.
-func New(id string) *Service {
+func New(id, version string) *Service {
 	return &Service{
 		Client: &http.Client{
 			Timeout:   30 * time.Second,
 			Transport: client.NewAuthTransport(id, http.DefaultTransport),
 		},
-		Stdin:  os.Stdin,
-		Stdout: os.Stdout,
+		Stdin:   os.Stdin,
+		Stdout:  os.Stdout,
+		Version: version,
 	}
 }

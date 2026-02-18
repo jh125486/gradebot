@@ -37,13 +37,13 @@ func ExampleNewKongContext() {
 	// Create a Kong context (binding is performed inside NewKongContext). In
 	// some environments calling kctx.Run(...) can exercise Kong's runtime
 	// binding paths; here we only assert the context was created successfully.
-	kctx := cli.NewKongContext(context.Background(), "gradebot", "build-id-123", &CLI, []string{"grade", "--dir", ".", "--run", "true"})
+	kctx := cli.NewKongContext(context.Background(), "gradebot", "build-id-123", "v1.0.0", &CLI, []string{"grade", "--dir", ".", "--run", "true"})
 	fmt.Println("kctx_created:", kctx != nil)
 
 	// Manually construct a service and run the command to demonstrate how the
 	// Run method receives an injected *cli.Service. This keeps the example
 	// deterministic and safe to run in package tests.
-	svc := cli.New("build-id-123")
+	svc := cli.New("build-id-123", "v1.0.0")
 	cmd := &exampleCommand{Args: cli.CommonArgs{WorkDir: cli.CommonArgs{}.WorkDir}} // leave defaults
 	_ = cmd.Run(svc)
 

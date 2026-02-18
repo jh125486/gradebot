@@ -89,6 +89,9 @@ func (e *DirectoryError) getPermissionHelp() string {
 type Config struct {
 	ServerURL string
 
+	// ClientVersion is the version of the running CLI.
+	ClientVersion string
+
 	// Execution specific fields
 	WorkDir WorkDir
 	RunCmd  string
@@ -217,6 +220,21 @@ func (cfg *Config) UploadResult(ctx context.Context, result *rubrics.Result) err
 		slog.String("response", resp.Msg.Message),
 	)
 
+	// Check for server version in response headers
+	if resp.Header() != nil {
+		if serverVersion := resp.Header().Get("X-Version"); serverVersion != "" {
+			fmt.Fprintf(w, "\nServer version: %s\n", serverVersion)
+			if cfg.ClientVersion != "" && cfg.ClientVersion != serverVersion {
+				fmt.Fprintf(w,
+					"WARNING: client version %s does not match server version %s. "+
+						"Please update your client.\n",
+					cfg.ClientVersion,
+					serverVersion,
+				)
+			}
+		}
+	}
+
 	return nil
 }
 
@@ -249,12 +267,12 @@ func PromptForSubmission(ctx context.Context, w io.Writer, r io.Reader) bool {
 // The name parameter identifies the project/assignment being graded.
 // The instructions parameter is used for AI quality evaluation when QualityClient is configured.
 // If bag is nil, a new empty bag is created. Otherwise, the provided bag is used (for pre-configured context).
-// If ProgramBuilder is nil, defaults to creating a Program with ExecCommandBuilder using Env.
+// If ProgramBuilder is nil, defaults to creating a Program with the provided Env.
 // This function is generic and can be used by any course-specific implementation.
 func ExecuteProject(ctx context.Context, cfg *Config, name, instructions string, bag rubrics.RunBag, items ...rubrics.Evaluator) error {
 	if cfg.ProgramBuilder == nil {
 		cfg.ProgramBuilder = func(workDir, runCmd string) (rubrics.ProgramRunner, error) {
-			return rubrics.NewProgram(workDir, runCmd, &rubrics.ExecCommandBuilder{Context: ctx, Env: cfg.Env}), nil
+			return rubrics.New(workDir, runCmd, rubrics.WithEnv(cfg.Env)), nil
 		}
 	}
 
@@ -276,7 +294,7 @@ func ExecuteProject(ctx context.Context, cfg *Config, name, instructions string,
 	}
 
 	// Run the program if it's not already running
-	if err := program.Run(); err != nil {
+	if err := program.Run(ctx); err != nil {
 		contextlog.From(ctx).ErrorContext(ctx, "failed to start program", slog.Any("error", err))
 		return err
 	}

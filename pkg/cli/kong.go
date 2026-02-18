@@ -18,16 +18,20 @@ type Context struct {
 // Used for Kong binding to avoid conflicts with plain strings.
 type BuildID string
 
+// Version is a distinct type for the application version.
+// Used for Kong binding to track server/client version mismatches.
+type Version string
+
 // NewKongContext creates a Kong context with required params.
-func NewKongContext(ctx context.Context, name, id string, cli any, args []string, opts ...kong.Option) *kong.Context {
+func NewKongContext(ctx context.Context, name, id, ver string, cli any, args []string, opts ...kong.Option) *kong.Context {
 	hashedID := sha256.Sum256([]byte(id))
 	buildID := hex.EncodeToString(hashedID[:])
-	svc := New(buildID)
+	svc := New(buildID, ver)
 
 	opts = append(opts,
 		kong.Name(name),
 		kong.UsageOnError(),
-		kong.Bind(Context{Context: ctx}, svc, BuildID(buildID)),
+		kong.Bind(Context{Context: ctx}, svc, BuildID(buildID), Version(ver)),
 	)
 	parser, err := kong.New(cli, opts...)
 	if err != nil {

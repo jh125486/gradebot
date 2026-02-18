@@ -188,7 +188,7 @@ func TestStart(t *testing.T) {
 				OpenAIClient: &mockReviewer{},
 			}
 			ctx := tt.setupCtx()
-			err := server.Start(ctx, cfg)
+			err := server.Start(ctx, &cfg)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -443,7 +443,7 @@ func TestStart_ServerLifecycle(t *testing.T) {
 				Storage: mockStore,
 			}
 
-			err := server.Start(ctx, cfg)
+			err := server.Start(ctx, &cfg)
 
 			if tt.wantErr {
 				assert.Error(t, err)
@@ -619,7 +619,7 @@ func TestRootHandler(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.args.path, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -695,7 +695,7 @@ func TestServeIndexPage(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/", http.NoBody)
 			rr := httptest.NewRecorder()
@@ -833,7 +833,7 @@ func TestHandleProjectRoutes(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.args.path, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -942,7 +942,7 @@ func TestParseSubmissionsFromResults(t *testing.T) {
 				_ = mockStore.SaveResult(ctx, result)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/test", http.NoBody)
 			rr := httptest.NewRecorder()
 
@@ -1071,7 +1071,7 @@ func TestProjectSubmissionsPageEdgeCases(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1177,7 +1177,7 @@ func TestSubmissionDetailPageEdgeCases(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1278,7 +1278,7 @@ func TestHTMXPartialRender(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, http.NoBody)
 			if tt.hxRequest {
@@ -1387,7 +1387,7 @@ func TestGetPaginationParams(t *testing.T) {
 				Rubric:       []*pb.RubricItem{{Name: "test", Points: 10, Awarded: 8}},
 			})
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx = contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/test-proj"+tt.queryParams, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1503,7 +1503,7 @@ func TestMultipleRubricItems(t *testing.T) {
 				assert.NoError(t, err)
 			}
 
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 			ctx := contextlog.With(t.Context(), contextlog.DiscardLogger())
 			req := httptest.NewRequestWithContext(ctx, http.MethodGet, tt.path, http.NoBody)
 			rr := httptest.NewRecorder()
@@ -1815,7 +1815,7 @@ func TestHTMLEndpoints(t *testing.T) {
 			}
 
 			// Create HTML handler with storage
-			htmlHandler := server.NewHTMLHandler(mockStore)
+			htmlHandler := server.NewHTMLHandler(mockStore, "v1.0.0")
 
 			// Create mux and register routes (simulating what Start does)
 			mux := http.NewServeMux()

@@ -696,7 +696,7 @@ type stubProgram struct {
 
 func (s *stubProgram) Path() string { return s.path }
 
-func (s *stubProgram) Run(_ ...string) error {
+func (s *stubProgram) Run(context.Context, ...string) error {
 	s.runCalled = true
 	return nil
 }
@@ -719,7 +719,7 @@ func (s *stubProgramWithRunError) Path() string {
 	return "/stub"
 }
 
-func (s *stubProgramWithRunError) Run(_ ...string) error {
+func (s *stubProgramWithRunError) Run(context.Context, ...string) error {
 	return errors.New("program run failed")
 }
 

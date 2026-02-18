@@ -59,14 +59,15 @@ func New(ctx cli.Context, cmd *CLI) (*Service, error) {
 }
 
 // Run executes the server command.
-func (cmd *CLI) Run(ctx cli.Context, buildID cli.BuildID) error {
+func (cmd *CLI) Run(ctx cli.Context, buildID cli.BuildID, version cli.Version) error {
 	svc, err := New(ctx, cmd)
 	if err != nil {
 		return err
 	}
 
-	return server.Start(ctx, server.Config{
+	return server.Start(ctx, &server.Config{
 		ID:           string(buildID),
+		Version:      string(version),
 		Port:         cmd.Port,
 		OpenAIClient: svc.OpenAIClient,
 		Storage:      svc.Storage,
