@@ -17,12 +17,11 @@ init: install-protoc
 	@go install golang.org/x/tools/cmd/goimports@latest
 	@echo "Development environment initialized ✓"
 
-deps-update:
+deps-update: lint-update
 	@echo "Updating Go modules to latest versions..."
 	@go get -u -t ./...
 	@go mod tidy
 	@echo "Go modules updated ✓"
-	@lint-update
 
 build:
 	@echo "Building $(BINARY_NAME) server"
@@ -97,12 +96,6 @@ docker-build:
 	else \
 		echo "No Dockerfile found"; \
 	fi
-
-## deps: Download and verify dependencies
-deps:
-	@echo "Downloading dependencies..."
-	@go mod download
-	@go mod verify
 
 ## install-protoc: Install latest protoc compiler and Go plugins
 install-protoc:
