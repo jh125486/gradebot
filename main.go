@@ -14,12 +14,6 @@ import (
 	basecli "github.com/jh125486/gradebot/pkg/cli"
 )
 
-var (
-	version = "dev"
-	commit  = "none"
-	date    = "unknown"
-)
-
 func main() {
 	// Load .env file if it exists
 	_ = godotenv.Load()
@@ -28,7 +22,7 @@ func main() {
 	defer stop()
 
 	var grammar cli.CLI
-	kctx := basecli.NewKongContext(ctx, "gradebot", version, commit, date, &grammar, os.Args[1:])
+	kctx := basecli.NewKongContext(ctx, "gradebot", os.Getenv("BUILD_ID"), "server", &grammar, os.Args[1:])
 	if err := kctx.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		os.Exit(1)

@@ -30,17 +30,15 @@ type (
 // NewKongContext creates a Kong context with required params.
 func NewKongContext(
 	ctx context.Context,
-	name, version, commit, date string,
+	name, buildID, version string,
 	cli any,
 	args []string,
 	opts ...kong.Option,
 ) *kong.Context {
-	buildID := os.Getenv("BUILD_ID")
 	ctx = contextlog.New(ctx, os.Getenv("LOG_LEVEL"),
 		slog.String("buildID", buildID),
 		slog.String("version", version),
-		slog.String("commit", commit),
-		slog.String("built", date))
+	)
 
 	hashedID := sha256.Sum256([]byte(buildID))
 	buildID = hex.EncodeToString(hashedID[:])
