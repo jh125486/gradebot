@@ -522,7 +522,7 @@ func TestHealthHandler(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(tt.args.method, "/health", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), tt.args.method, "/health", http.NoBody)
 			rr := httptest.NewRecorder()
 
 			server.HealthHandler(rr, req)

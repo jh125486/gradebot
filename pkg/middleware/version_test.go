@@ -58,7 +58,7 @@ func TestVersionMiddleware(t *testing.T) {
 			handler := versionMiddleware(nextHandler)
 
 			rr := httptest.NewRecorder()
-			req := httptest.NewRequest("GET", "/test", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), "GET", "/test", http.NoBody)
 
 			handler.ServeHTTP(rr, req)
 
@@ -85,7 +85,7 @@ func TestVersionMiddlewarePreservesExistingHeaders(t *testing.T) {
 	handler := versionMiddleware(nextHandler)
 
 	rr := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/test", http.NoBody)
+	req := httptest.NewRequestWithContext(t.Context(), "GET", "/test", http.NoBody)
 
 	handler.ServeHTTP(rr, req)
 

@@ -73,7 +73,7 @@ func TestAuthMiddlewareValidToken(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest("GET", "/protected", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), "GET", "/protected", http.NoBody)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -139,7 +139,7 @@ func TestAuthMiddlewareStatusCodeAndMessage(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest("GET", "/protected", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), "GET", "/protected", http.NoBody)
 			if tt.authHeader != "" {
 				req.Header.Set("Authorization", tt.authHeader)
 			}
@@ -171,7 +171,7 @@ func TestAuthMiddlewareHTTPMethods(t *testing.T) {
 		t.Run(method, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(method, "/protected", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), method, "/protected", http.NoBody)
 			req.Header.Set("Authorization", "Bearer valid-token")
 			req = req.WithContext(contextlog.With(req.Context(), contextlog.DiscardLogger()))
 

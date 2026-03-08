@@ -116,7 +116,7 @@ func (c *GeoLocationClient) Do(ctx context.Context, ip string) string {
 		return unknownLocation
 	}
 
-	resp, err := c.Client.Do(req) //nolint:gosec // Request URL is constructed from validated IP address
+	resp, err := c.Client.Do(req)
 	if err != nil {
 		contextlog.From(ctx).WarnContext(ctx, "Failed to fetch geo location",
 			slog.String("ip", ip),

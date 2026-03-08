@@ -76,7 +76,7 @@ func TestLogging(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(tt.method, tt.path, http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), tt.method, tt.path, http.NoBody)
 			req.RemoteAddr = tt.remoteAddr
 
 			// Set up context with logger and optionally with real IP
@@ -121,8 +121,7 @@ func TestLoggingCapturesStatusCode(t *testing.T) {
 		t.Run("status_"+string(rune(code)), func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest("GET", "/test", http.NoBody)
-			req = req.WithContext(contextlog.With(req.Context(), contextlog.DiscardLogger()))
+			req := httptest.NewRequestWithContext(contextlog.With(t.Context(), contextlog.DiscardLogger()), "GET", "/test", http.NoBody)
 
 			nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				w.WriteHeader(code)
@@ -141,8 +140,7 @@ func TestLoggingCapturesStatusCode(t *testing.T) {
 func TestLoggingHandlerCalled(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest("GET", "/test", http.NoBody)
-	req = req.WithContext(contextlog.With(req.Context(), contextlog.DiscardLogger()))
+	req := httptest.NewRequestWithContext(contextlog.With(t.Context(), contextlog.DiscardLogger()), "GET", "/test", http.NoBody)
 
 	handlerCalled := false
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -161,8 +159,7 @@ func TestLoggingHandlerCalled(t *testing.T) {
 func TestLoggingDurationTracking(t *testing.T) {
 	t.Parallel()
 
-	req := httptest.NewRequest("GET", "/test", http.NoBody)
-	req = req.WithContext(contextlog.With(req.Context(), contextlog.DiscardLogger()))
+	req := httptest.NewRequestWithContext(contextlog.With(t.Context(), contextlog.DiscardLogger()), "GET", "/test", http.NoBody)
 
 	nextHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate some work
