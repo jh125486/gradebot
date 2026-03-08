@@ -42,10 +42,8 @@ func NewClient(apiKey string, client *http.Client, opts ...option.RequestOption)
 			Timeout: 30 * time.Second, // Add timeout to prevent hanging requests
 		}
 	}
-	required := []option.RequestOption{
-		option.WithAPIKey(apiKey),
-		option.WithHTTPClient(client),
-	}
+	required := make([]option.RequestOption, 0, 2+len(opts))
+	required = append(required, option.WithAPIKey(apiKey), option.WithHTTPClient(client))
 	opts = append(required, opts...)
 
 	return &Client{
