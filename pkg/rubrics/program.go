@@ -61,6 +61,7 @@ type Program struct {
 	inputReader io.Reader
 
 	cleanup func() error
+	running bool
 }
 
 // New creates a new Program instance.
@@ -124,8 +125,13 @@ func WithCommandBuilder(builder CommandBuilder) func(*Program) {
 // Path returns the working directory path
 func (p *Program) Path() string { return p.workDir }
 
-// Run starts the program with the given arguments
+// Run starts the program with the given arguments.
+// If the program is already running, Run is a no-op and returns nil.
 func (p *Program) Run(ctx context.Context, args ...string) (err error) {
+	if p.running {
+		return nil
+	}
+
 	cmdName, cmdArgs := p.resolveCommand(args)
 	if cmdName == "" {
 		return fmt.Errorf("no run command configured")
@@ -201,6 +207,7 @@ func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []st
 		return err
 	}
 
+	p.running = true
 	return nil
 }
 
@@ -279,7 +286,9 @@ func copyArgs(src []string) []string {
 
 // Kill terminates the running program process
 func (p *Program) Kill() error {
-	return p.cleanup()
+	err := p.cleanup()
+	p.running = false
+	return err
 }
 
 // Cleanup prepares the program environment for a fresh run by removing

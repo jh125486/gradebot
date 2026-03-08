@@ -465,6 +465,51 @@ func TestProgram_Run(t *testing.T) {
 				assert.Equal(t, prog.Path(), cwd)
 			},
 		},
+		{
+			name: "IdempotentRun_AlreadyRunning",
+			setup: func(t *testing.T) (rubrics.ProgramRunner, *MockCommander) {
+				mockCmd := NewMockCommander()
+				mockCmd.On("SetDir", mock.Anything).Return()
+				mockCmd.On("SetEnv", mock.Anything).Return()
+				mockCmd.On("SetStdin", mock.Anything).Return()
+				mockCmd.On("SetStdout", mock.Anything).Return()
+				mockCmd.On("SetStderr", mock.Anything).Return()
+				// Start must only be called once even though Run is called twice
+				mockCmd.On("Start").Return(nil).Once()
+				prog := rubrics.NewWithCommander(".", "go", mockCmd)
+				require.NoError(t, prog.Run(t.Context()))
+				return prog, mockCmd
+			},
+			args:    []string{"run", "."},
+			wantErr: false,
+			verify: func(t *testing.T, prog rubrics.ProgramRunner, mockCmd *MockCommander) {
+				// AssertExpectations verifies Start was called exactly once
+				mockCmd.AssertExpectations(t)
+			},
+		},
+		{
+			name: "RunAfterKill_StartsNewProcess",
+			setup: func(t *testing.T) (rubrics.ProgramRunner, *MockCommander) {
+				mockCmd := NewMockCommander()
+				mockCmd.On("SetDir", mock.Anything).Return()
+				mockCmd.On("SetEnv", mock.Anything).Return()
+				mockCmd.On("SetStdin", mock.Anything).Return()
+				mockCmd.On("SetStdout", mock.Anything).Return()
+				mockCmd.On("SetStderr", mock.Anything).Return()
+				mockCmd.On("ProcessKill").Return(nil)
+				// Start is called twice: once before kill, once after
+				mockCmd.On("Start").Return(nil).Twice()
+				prog := rubrics.NewWithCommander(".", "go", mockCmd)
+				require.NoError(t, prog.Run(t.Context()))
+				require.NoError(t, prog.Kill())
+				return prog, mockCmd
+			},
+			args:    []string{"run", "."},
+			wantErr: false,
+			verify: func(t *testing.T, prog rubrics.ProgramRunner, mockCmd *MockCommander) {
+				mockCmd.AssertExpectations(t)
+			},
+		},
 	}
 
 	for _, tt := range tests {
