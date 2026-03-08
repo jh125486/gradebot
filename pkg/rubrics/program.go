@@ -213,12 +213,12 @@ func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []st
 
 // Do sends input to the running program and returns captured output
 func (p *Program) Do(in string) (stdout, stderr []string, err error) {
+	prevOutLen := p.out.Len()
+	prevErrLen := p.errOut.Len()
+
 	if err := p.sendToStdin(in); err != nil {
 		return nil, nil, err
 	}
-
-	prevOutLen := p.out.Len()
-	prevErrLen := p.errOut.Len()
 
 	p.waitForOutput(prevOutLen, prevErrLen)
 
