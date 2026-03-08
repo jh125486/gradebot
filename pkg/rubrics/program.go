@@ -230,8 +230,24 @@ func (p *Program) sendToStdin(in string) error {
 	if p.inputWriter == nil {
 		return nil
 	}
-	_, err := p.inputWriter.Write([]byte(in + "\n"))
-	return err
+
+	errCh := make(chan error, 1)
+	go func() {
+		_, err := p.inputWriter.Write([]byte(in + "\n"))
+		errCh <- err
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case <-time.After(750 * time.Millisecond):
+		// XXX(post-semester): Replace this timeout fallback with explicit process
+		// lifecycle handling (close/recreate stdin pipe on restart and/or a ready
+		// handshake) so writes fail fast without relying on elapsed time.
+		// Mark as not running so callers can restart cleanly if the process exited.
+		p.running = false
+		return fmt.Errorf("stdin write timed out")
+	}
 }
 
 func (p *Program) waitForOutput(prevOutLen, prevErrLen int) {
