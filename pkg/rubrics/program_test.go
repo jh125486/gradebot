@@ -482,6 +482,8 @@ func TestProgram_Run(t *testing.T) {
 			},
 			args:    []string{"run", "."},
 			wantErr: false,
+			// noParallel: setup calls Run which does os.Chdir; avoid racing with other parallel tests
+			noParallel: true,
 			verify: func(t *testing.T, prog rubrics.ProgramRunner, mockCmd *MockCommander) {
 				// AssertExpectations verifies Start was called exactly once
 				mockCmd.AssertExpectations(t)
@@ -506,6 +508,8 @@ func TestProgram_Run(t *testing.T) {
 			},
 			args:    []string{"run", "."},
 			wantErr: false,
+			// noParallel: setup calls Run which does os.Chdir; avoid racing with other parallel tests
+			noParallel: true,
 			verify: func(t *testing.T, prog rubrics.ProgramRunner, mockCmd *MockCommander) {
 				mockCmd.AssertExpectations(t)
 			},

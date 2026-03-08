@@ -287,8 +287,22 @@ func copyArgs(src []string) []string {
 // Kill terminates the running program process
 func (p *Program) Kill() error {
 	err := p.cleanup()
-	p.running = false
+	if err == nil || isAlreadyExited(err) {
+		p.running = false
+	}
 	return err
+}
+
+// isAlreadyExited reports whether the error from killing a process indicates
+// the process had already exited (and is therefore no longer running).
+func isAlreadyExited(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "process already finished") ||
+		strings.Contains(msg, "os: process already finished") ||
+		strings.Contains(msg, "invalid argument")
 }
 
 // Cleanup prepares the program environment for a fresh run by removing
