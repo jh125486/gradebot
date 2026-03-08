@@ -51,7 +51,7 @@ func TestStoreRealIPMiddleware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 			for k, v := range tt.headers {
 				req.Header.Set(k, v)
 			}

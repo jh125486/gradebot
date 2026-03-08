@@ -27,7 +27,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			req := httptest.NewRequest(http.MethodGet, "/", http.NoBody)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/", http.NoBody)
 			if tt.headerSet {
 				req.Header.Set(middleware.RequestIDHeader, tt.headerVal)
 			}
