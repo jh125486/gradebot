@@ -28,7 +28,7 @@ linters:
     - gocritic
     - gocyclo
     - godox
-    - gomodguard
+    - gomodguard_v2
     - goprintffuncname
     - gosec
     - govet
@@ -67,6 +67,8 @@ linters:
       ignore-comments: true
     gocognit:
       min-complexity: 20
+    goconst:
+      ignore-tests: true
     gocritic:
       enabled-tags:
         - diagnostic

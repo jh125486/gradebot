@@ -110,7 +110,18 @@ Every file is below, delimited by triple backticks and a language tag if applica
 		parts[i+1] = f
 	}
 
-	// Make the request with low variance
+	const (
+		schemaTypeKey                = "type"
+		schemaPropertiesKey          = "properties"
+		schemaQualityScoreKey        = "quality_score"
+		schemaFeedbackKey            = "feedback"
+		schemaRequiredKey            = "required"
+		schemaAditionalPropertiesKey = "additionalProperties"
+		schemaMinKey                 = "minimum"
+		schemaMaxKey                 = "maximum"
+		schemaMinLengthKey           = "minLength"
+		schemaMaxLengthKey           = "maxLength"
+	)
 	resp, err := c.Responses.New(reviewCtx,
 		responses.ResponseNewParams{
 			Model: openai.ChatModelGPT4oMini,
@@ -142,21 +153,21 @@ Every file is below, delimited by triple backticks and a language tag if applica
 						Name:   "ai_review",
 						Strict: openai.Bool(true),
 						Schema: map[string]any{
-							"type": "object",
-							"properties": map[string]any{
-								"quality_score": map[string]any{
-									"type":    "integer",
-									"minimum": 0,
-									"maximum": 100,
+							schemaTypeKey: "object",
+							schemaPropertiesKey: map[string]any{
+								schemaQualityScoreKey: map[string]any{
+									schemaTypeKey: "integer",
+									schemaMinKey:  0,
+									schemaMaxKey:  100,
 								},
-								"feedback": map[string]any{
-									"type":      "string",
-									"minLength": 1,
-									"maxLength": 800,
+								schemaFeedbackKey: map[string]any{
+									schemaTypeKey:      "string",
+									schemaMinLengthKey: 1,
+									schemaMaxLengthKey: 800,
 								},
 							},
-							"required":             []string{"quality_score", "feedback"},
-							"additionalProperties": false,
+							schemaRequiredKey:            []string{schemaQualityScoreKey, schemaFeedbackKey},
+							schemaAditionalPropertiesKey: false,
 						},
 					},
 				},
