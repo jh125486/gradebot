@@ -23,7 +23,7 @@ services:
       - postgres
 
   localstack:
-    image: localstack/localstack:latest
+    image: ghcr.io/blackbirdworks/gopherstack:latest
     ports:
       - "4566:4566"
     environment:
@@ -55,7 +55,7 @@ services:
     networks:
       - gradebot-network
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gradebot"]
+      test: [ "CMD-SHELL", "pg_isready -U gradebot" ]
       interval: 5s
       timeout: 5s
       retries: 5

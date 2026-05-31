@@ -27,7 +27,7 @@ jobs:
           --health-retries=5
 
       localstack:
-        image: localstack/localstack:latest
+        image: ghcr.io/blackbirdworks/gopherstack:latest
         ports:
           - 4566:4566
         env:
