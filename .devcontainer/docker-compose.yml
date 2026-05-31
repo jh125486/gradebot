@@ -9,7 +9,7 @@ services:
     working_dir: /workspaces/gradebot
     command: sleep infinity
     environment:
-      - R2_ENDPOINT=http://localstack:4566
+      - R2_ENDPOINT=http://localstack:8000
       - R2_BUCKET=test-gradebot-bucket
       - AWS_ACCESS_KEY_ID=test
       - AWS_SECRET_ACCESS_KEY=test
@@ -25,7 +25,7 @@ services:
   localstack:
     image: ghcr.io/blackbirdworks/gopherstack:latest
     ports:
-      - "4566:4566"
+      - "8000:8000"
     environment:
       DEBUG: 1
       SERVICES: s3
@@ -33,7 +33,6 @@ services:
       DOCKER_HOST: unix:///var/run/docker.sock
       HOST_TMP_FOLDER: /tmp/localstack
       LAMBDA_EXECUTOR: docker-reuse
-      LOCALSTACK_API_KEY: ${LOCALSTACK_API_KEY:-}
       # Pre-create the bucket
       S3_SKIP_SIGNATURE_VALIDATION: 1
     volumes:

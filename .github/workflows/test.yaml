@@ -29,13 +29,13 @@ jobs:
       localstack:
         image: ghcr.io/blackbirdworks/gopherstack:latest
         ports:
-          - 4566:4566
+          - 8000:8000
         env:
           DEBUG: 1
           SERVICES: s3
           S3_SKIP_SIGNATURE_VALIDATION: 1
         options: >-
-          --health-cmd="curl -f http://localhost:4566/_localstack/health || exit 1"
+          --health-cmd="curl -f http://localhost:8000/dashboard || exit 1"
           --health-interval=30s
           --health-timeout=10s
           --health-retries=5
@@ -61,7 +61,7 @@ jobs:
         run: go test -v -race -coverprofile=coverage.txt ./...
         env:
           DATABASE_URL: "postgres://postgres:password@localhost:5432/gradebot_test?sslmode=disable"
-          R2_ENDPOINT: http://localhost:4566
+          R2_ENDPOINT: http://localhost:8000
           R2_BUCKET: test-gradebot-bucket
           AWS_ACCESS_KEY_ID: test
           AWS_SECRET_ACCESS_KEY: test
