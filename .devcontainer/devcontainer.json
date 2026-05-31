@@ -75,7 +75,7 @@
   // Use 'forwardPorts' to make a list of ports inside the container available locally.
   "forwardPorts": [
     8080,
-    4566,
+    8000,
     5432
   ],
   "portsAttributes": {
@@ -83,7 +83,7 @@
       "label": "Gradebot Server",
       "onAutoForward": "notify"
     },
-    "4566": {
+    "8000": {
       "label": "LocalStack",
       "onAutoForward": "notify"
     },
@@ -102,7 +102,7 @@
   "remoteUser": "vscode",
   // Configure environment variables
   "containerEnv": {
-    "R2_ENDPOINT": "http://localstack:4566",
+    "R2_ENDPOINT": "http://localstack:8000",
     "R2_BUCKET": "test-gradebot-bucket",
     "AWS_ACCESS_KEY_ID": "test",
     "AWS_SECRET_ACCESS_KEY": "test",
