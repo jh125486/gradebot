@@ -6,7 +6,7 @@ import (
 	"io"
 	"time"
 
-	"github.com/docker/docker/pkg/namesgenerator"
+	"github.com/google/uuid"
 	"github.com/olekukonko/tablewriter"
 	"github.com/olekukonko/tablewriter/tw"
 )
@@ -84,7 +84,7 @@ func (r *Result) Awarded() float64 {
 // NewResult returns a Result prepared to collect rubric items.
 func NewResult(project string) *Result {
 	return &Result{
-		SubmissionID: namesgenerator.GetRandomName(0),
+		SubmissionID: uuid.New().String(),
 		Timestamp:    time.Now(),
 		Rubric:       make([]RubricItem, 0),
 		Project:      project,
