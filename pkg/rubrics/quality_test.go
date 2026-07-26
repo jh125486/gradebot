@@ -175,7 +175,7 @@ func TestEvaluateQuality(t *testing.T) {
 				},
 				sourceFS: fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\n\nfunc main() { println(\"hello\") }")}},
 			},
-			want: want{name: "Quality", noteContain: "Good code quality", points: 17.0},
+			want: want{name: "Quality", noteContain: "Good code quality", points: 4.25},
 		},
 		{
 			name: "ClientError",
@@ -193,7 +193,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 90, Feedback: "Great code"}},
 				sourceFS:     fstest.MapFS{},
 			},
-			want: want{name: "Quality", noteContain: "Great code", points: 18.0},
+			want: want{name: "Quality", noteContain: "Great code", points: 4.5},
 		},
 		{
 			name: "LoadFilesFileSystemError",
@@ -211,7 +211,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 75, Feedback: "Decent code quality"}},
 				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\nfunc main() {}")}, "binary.go": &fstest.MapFile{Data: []byte{0x00, 0x01, 0x02, 0xFF, 0xFE}}},
 			},
-			want: want{name: "Quality", noteContain: "Decent code quality", points: 15.0},
+			want: want{name: "Quality", noteContain: "Decent code quality", points: 3.75},
 		},
 		{
 			name: "ExcludeDirectories",
@@ -220,7 +220,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 80, Feedback: "Good structure"}},
 				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}, "src/lib.go": &fstest.MapFile{Data: []byte("package lib")}, "target/main.go": &fstest.MapFile{Data: []byte("package target")}, ".git/config": &fstest.MapFile{Data: []byte("git config")}, "node_modules/x.js": &fstest.MapFile{Data: []byte("console.log('test')")}},
 			},
-			want: want{name: "Quality", noteContain: "Good structure", points: 16.0},
+			want: want{name: "Quality", noteContain: "Good structure", points: 4.0},
 		},
 		{
 			name: "MixedFileTypes",
@@ -229,7 +229,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 85, Feedback: "Multi-language code"}},
 				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main")}, "app.py": &fstest.MapFile{Data: []byte("print('hello')")}, "lib.rs": &fstest.MapFile{Data: []byte("fn main() {}")}, "script.js": &fstest.MapFile{Data: []byte("console.log('test')")}, "config.yaml": &fstest.MapFile{Data: []byte("key: value")}, "README": &fstest.MapFile{Data: []byte("readme")}},
 			},
-			want: want{name: "Quality", noteContain: "Multi-language code", points: 17.0},
+			want: want{name: "Quality", noteContain: "Multi-language code", points: 4.25},
 		},
 		{
 			name: "WalkDirError",
@@ -275,7 +275,7 @@ func TestEvaluateQuality(t *testing.T) {
 					"src/nested.go": &fstest.MapFile{Data: []byte("package nested")},
 				},
 			},
-			want: want{name: "Quality", noteContain: "Mixed code quality", points: 17.0},
+			want: want{name: "Quality", noteContain: "Mixed code quality", points: 4.25},
 		},
 
 		{
@@ -285,7 +285,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 100, Feedback: "Only valid UTF-8 files processed"}},
 				sourceFS:     fstest.MapFS{"main.go": &fstest.MapFile{Data: []byte("package main\nfunc main() { fmt.Println(\"Hello\") }")}, "invalid.go": &fstest.MapFile{Data: []byte{0xFF, 0xFE, 0xFD}}},
 			},
-			want: want{name: "Quality", noteContain: "Only valid UTF-8 files processed", points: 20.0},
+			want: want{name: "Quality", noteContain: "Only valid UTF-8 files processed", points: 5.0},
 		},
 		{
 			name: "WalkDirErrorTest",
@@ -303,7 +303,7 @@ func TestEvaluateQuality(t *testing.T) {
 				mockClient:   &MockQualityServiceClient{EvaluateResponse: &pb.EvaluateCodeQualityResponse{QualityScore: 100, Feedback: "Perfect code"}},
 				sourceFS:     fstest.MapFS{"perfect.go": &fstest.MapFile{Data: []byte("package main\n\n// Perfect Go code\nfunc main() {\n\tfmt.Println(\"Hello, World!\")\n}")}},
 			},
-			want: want{name: "Quality", noteContain: "Perfect code", points: 20.0},
+			want: want{name: "Quality", noteContain: "Perfect code", points: 5.0},
 		},
 		{
 			name: "RealWalkError",

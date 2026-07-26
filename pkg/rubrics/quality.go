@@ -24,7 +24,7 @@ func EvaluateQuality(client protoconnect.QualityServiceClient, sourceFS fs.FS, i
 				Name:    "Quality",
 				Note:    msg,
 				Awarded: awarded,
-				Points:  20,
+				Points:  5,
 			}
 		}
 
@@ -41,7 +41,7 @@ func EvaluateQuality(client protoconnect.QualityServiceClient, sourceFS fs.FS, i
 		if err != nil {
 			return itemRubric(fmt.Sprintf("Connect call failed: %v", err), 0)
 		}
-		awarded := float64(resp.Msg.QualityScore) / 100.0 * 20
+		awarded := float64(resp.Msg.QualityScore) / 100.0 * 5
 
 		return itemRubric(resp.Msg.Feedback, awarded)
 	}
