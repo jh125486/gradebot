@@ -59,6 +59,17 @@ type Program struct {
 
 	inputWriter io.WriteCloser
 	inputReader io.Reader
+	ownsPipe    bool // true when inputReader/inputWriter is our own io.Pipe(), not caller-supplied via WithReaderWriter
+
+	// spawnCtx is the context used for every exec.CommandContext call, captured
+	// once from whichever Run() call spawns the process first. Callers (e.g.
+	// ExecuteProject) typically give each rubric item its own short-lived
+	// context that's cancelled as soon as that item returns; exec.CommandContext
+	// kills the process the moment its context is done, regardless of item
+	// boundaries. Reusing the first ctx for every respawn keeps the process's
+	// lifetime tied to the overall run instead of whichever evaluator happened
+	// to trigger the (re)spawn.
+	spawnCtx context.Context
 
 	cleanup func() error
 	running bool
@@ -79,6 +90,7 @@ func New(workDir, runCmd string, opts ...func(*Program)) *Program {
 		env:         os.Environ(),
 		inputReader: pr,
 		inputWriter: pw,
+		ownsPipe:    true,
 		cleanup:     func() error { return nil }, // Default no-op cleanup
 	}
 
@@ -103,6 +115,7 @@ func WithReaderWriter(reader io.Reader, writer io.WriteCloser) func(*Program) {
 	return func(p *Program) {
 		p.inputReader = reader
 		p.inputWriter = writer
+		p.ownsPipe = false
 	}
 }
 
@@ -181,12 +194,16 @@ func (p *Program) resolveCommand(args []string) (cmdName string, cmdArgs []strin
 }
 
 func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []string) error {
+	if p.spawnCtx == nil {
+		p.spawnCtx = ctx
+	}
+
 	var cmd Commander
 	if p.commandBuilder != nil {
 		cmd = p.commandBuilder(cmdName, cmdArgs...)
 	} else {
 		cmd = &execCmd{
-			Cmd: exec.CommandContext(ctx, cmdName, cmdArgs...),
+			Cmd: exec.CommandContext(p.spawnCtx, cmdName, cmdArgs...),
 		}
 	}
 	cmd.SetDir(p.workDir)
@@ -241,13 +258,32 @@ func (p *Program) sendToStdin(in string) error {
 	case err := <-errCh:
 		return err
 	case <-time.After(750 * time.Millisecond):
-		// XXX(post-semester): Replace this timeout fallback with explicit process
-		// lifecycle handling (close/recreate stdin pipe on restart and/or a ready
-		// handshake) so writes fail fast without relying on elapsed time.
-		// Mark as not running so callers can restart cleanly if the process exited.
+		// The process is presumed wedged/dead. Actually kill it (not just
+		// flip p.running) and reset the pipe: otherwise the next Run() spawns
+		// a second, still-alive process sharing this pipe with the abandoned
+		// one, and the two processes' stdin-bridge goroutines race for every
+		// future write -- silently splitting the command stream between them.
 		p.running = false
+		_ = p.cleanup()
+		p.resetPipe()
 		return fmt.Errorf("stdin write timed out")
 	}
+}
+
+// resetPipe replaces the stdin pipe with a fresh one, closing the old writer
+// first so any goroutine still reading/writing the old pipe (e.g. the
+// abandoned process's stdin-bridge goroutine spawned internally by os/exec)
+// is released instead of lingering to contend with the next process. This is
+// a no-op when the reader/writer were supplied via WithReaderWriter, since
+// callers own that lifecycle themselves.
+func (p *Program) resetPipe() {
+	if !p.ownsPipe {
+		return
+	}
+	_ = p.inputWriter.Close()
+	pr, pw := io.Pipe()
+	p.inputReader = pr
+	p.inputWriter = pw
 }
 
 func (p *Program) waitForOutput(prevOutLen, prevErrLen int) {
@@ -255,12 +291,34 @@ func (p *Program) waitForOutput(prevOutLen, prevErrLen int) {
 		return
 	}
 
+	const (
+		pollInterval = 10 * time.Millisecond
+		quietPeriod  = 30 * time.Millisecond
+	)
 	deadline := time.Now().Add(750 * time.Millisecond)
+
 	for time.Now().Before(deadline) {
 		if p.out.Len() > prevOutLen || p.errOut.Len() > prevErrLen {
 			break
 		}
-		time.Sleep(10 * time.Millisecond)
+		time.Sleep(pollInterval)
+	}
+
+	// A response can be delivered across more than one Write (e.g. a
+	// multi-line print flushed in separate chunks as it crosses the OS
+	// pipe). Returning the instant the first byte shows up slices off a
+	// partial response and leaks the rest into whatever the next Do()
+	// call captures. Instead, keep polling until both buffers have gone
+	// quiet (no growth) for a short period, bounded by the same deadline.
+	lastOutLen, lastErrLen := p.out.Len(), p.errOut.Len()
+	quietUntil := time.Now().Add(quietPeriod)
+	for time.Now().Before(deadline) && time.Now().Before(quietUntil) {
+		time.Sleep(pollInterval)
+		outLen, errLen := p.out.Len(), p.errOut.Len()
+		if outLen != lastOutLen || errLen != lastErrLen {
+			lastOutLen, lastErrLen = outLen, errLen
+			quietUntil = time.Now().Add(quietPeriod)
+		}
 	}
 }
 
@@ -306,6 +364,21 @@ func (p *Program) Kill() error {
 	if err == nil || isAlreadyExited(err) {
 		p.running = false
 	}
+
+	// exec.Cmd spawns a background goroutine that copies from inputReader
+	// into the child's real stdin whenever Stdin isn't an *os.File. That
+	// goroutine only exits once Wait() sees the process exit and closes its
+	// pipe -- but Kill() never waits, so the goroutine is left blocked
+	// reading from inputReader indefinitely. On restart, Run() hands the new
+	// process the *same* inputReader, so the new process's stdin-bridge
+	// goroutine now competes with the still-blocked old one for every future
+	// write on the pipe: a write can be silently handed to the dead
+	// goroutine and lost instead of reaching the live process, permanently
+	// desyncing the command/response stream. resetPipe closes the old writer
+	// (releasing that goroutine with EOF) and hands the next Run() a
+	// brand-new, uncontended pipe.
+	p.resetPipe()
+
 	return err
 }
 
