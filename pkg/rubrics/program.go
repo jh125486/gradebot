@@ -244,13 +244,19 @@ func (p *Program) Do(in string) (stdout, stderr []string, err error) {
 }
 
 func (p *Program) sendToStdin(in string) error {
-	if p.inputWriter == nil {
+	// Snapshot the writer before launching the goroutine below: if this
+	// write times out, resetPipe reassigns p.inputWriter to a new pipe
+	// while that goroutine is still blocked on the old one. Reading
+	// p.inputWriter from inside the goroutine would race with that
+	// reassignment; writing to this local copy instead does not.
+	writer := p.inputWriter
+	if writer == nil {
 		return nil
 	}
 
 	errCh := make(chan error, 1)
 	go func() {
-		_, err := p.inputWriter.Write([]byte(in + "\n"))
+		_, err := writer.Write([]byte(in + "\n"))
 		errCh <- err
 	}()
 
