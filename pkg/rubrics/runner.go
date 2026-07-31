@@ -82,16 +82,15 @@ type ProgramRunner interface {
 	Cleanup(ctx context.Context) error
 }
 
-// ExecCommandBuilder creates Commander instances with context and environment settings.
+// ExecCommandBuilder creates Commander instances with environment settings.
 // It is used to factory Commander instances for program execution.
 type ExecCommandBuilder struct {
-	Context context.Context
-	Env     map[string]string
+	Env map[string]string
 }
 
-// New creates a new Commander with the configured context and environment.
-func (b *ExecCommandBuilder) New(name string, args ...string) Commander {
-	cmd := exec.CommandContext(b.Context, name, args...)
+// New creates a new Commander bound to ctx, with the configured environment.
+func (b *ExecCommandBuilder) New(ctx context.Context, name string, args ...string) Commander {
+	cmd := exec.CommandContext(ctx, name, args...)
 	execCmd := &execCmd{Cmd: cmd}
 
 	if b.Env != nil {

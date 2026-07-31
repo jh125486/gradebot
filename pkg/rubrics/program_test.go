@@ -216,9 +216,10 @@ func (m *MockCommander) SetStderr(stderr io.Writer) {
 	m.outputs["stderr_writer"] = []byte("mock stderr")
 }
 
-func (m *MockCommander) Run() error {
-	args := m.Called()
-	// Write to stored outputs if available
+// flushStoredOutputs writes any stdout/stderr previously captured via
+// SetStdout/SetStderr to their respective writers. Shared by Run and Start,
+// which otherwise only differ in the mock method name recorded by m.Called().
+func (m *MockCommander) flushStoredOutputs() {
 	if data, ok := m.outputs["stdout_writer"]; ok && len(m.Calls) >= 3 {
 		if writer, ok := m.Calls[2].Arguments.Get(0).(io.Writer); ok {
 			writer.Write(data)
@@ -229,22 +230,17 @@ func (m *MockCommander) Run() error {
 			writer.Write(data)
 		}
 	}
+}
+
+func (m *MockCommander) Run() error {
+	args := m.Called()
+	m.flushStoredOutputs()
 	return args.Error(0)
 }
 
 func (m *MockCommander) Start() error {
 	args := m.Called()
-	// Write to stored outputs if available
-	if data, ok := m.outputs["stdout_writer"]; ok && len(m.Calls) >= 3 {
-		if writer, ok := m.Calls[2].Arguments.Get(0).(io.Writer); ok {
-			writer.Write(data)
-		}
-	}
-	if data, ok := m.outputs["stderr_writer"]; ok && len(m.Calls) >= 4 {
-		if writer, ok := m.Calls[3].Arguments.Get(0).(io.Writer); ok {
-			writer.Write(data)
-		}
-	}
+	m.flushStoredOutputs()
 	return args.Error(0)
 }
 
