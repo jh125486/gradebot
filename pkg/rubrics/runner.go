@@ -89,6 +89,12 @@ type ExecCommandBuilder struct {
 }
 
 // New creates a new Commander bound to ctx, with the configured environment.
+//
+// BREAKING CHANGE: prior to this version, New took no ctx parameter and
+// ExecCommandBuilder instead stored it on an exported Context field
+// (flagged by SonarCloud S8242 as an anti-pattern -- a context tied to the
+// struct's lifetime rather than the call it governs). Callers must now pass
+// ctx explicitly and drop any use of the removed Context field.
 func (b *ExecCommandBuilder) New(ctx context.Context, name string, args ...string) Commander {
 	cmd := exec.CommandContext(ctx, name, args...)
 	execCmd := &execCmd{Cmd: cmd}

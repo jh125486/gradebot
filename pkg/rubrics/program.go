@@ -69,9 +69,7 @@ type Program struct {
 	// boundaries. Reusing the first ctx for every respawn keeps the process's
 	// lifetime tied to the overall run instead of whichever evaluator happened
 	// to trigger the (re)spawn.
-	//
-	// NOSONAR(godre:S8242): deliberately stored, not a parameter — see above.
-	spawnCtx context.Context
+	spawnCtx context.Context // NOSONAR(godre:S8242): deliberately stored, not a parameter — see above.
 
 	cleanup func() error
 	running bool
