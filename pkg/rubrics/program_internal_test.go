@@ -35,61 +35,98 @@ func (w *blockingWriteCloser) Close() error {
 	return nil
 }
 
-func TestSendToStdin_TimeoutKillsAndResetsOwnedPipe(t *testing.T) {
+func TestSendToStdin(t *testing.T) {
 	t.Parallel()
 
-	origWriter := newBlockingWriteCloser()
-	defer origWriter.Close()
+	var ownedPipeCleanupCalled atomic.Bool
 
-	var cleanupCalled atomic.Bool
-	p := &Program{
-		inputWriter: origWriter,
-		inputReader: strings.NewReader(""),
-		ownsPipe:    true,
-		running:     true,
-		cleanup: func() error {
-			cleanupCalled.Store(true)
-			return nil
+	tests := map[string]struct {
+		build        func(t *testing.T) *Program
+		wantErr      string
+		checkElapsed bool
+		verify       func(t *testing.T, p *Program, origWriter io.WriteCloser, origReader io.Reader)
+	}{
+		"timeout kills and resets owned pipe": {
+			build: func(t *testing.T) *Program {
+				origWriter := newBlockingWriteCloser()
+				t.Cleanup(func() { origWriter.Close() })
+
+				return &Program{
+					inputWriter: origWriter,
+					inputReader: strings.NewReader(""),
+					ownsPipe:    true,
+					running:     true,
+					cleanup: func() error {
+						ownedPipeCleanupCalled.Store(true)
+						return nil
+					},
+				}
+			},
+			wantErr:      "stdin write timed out",
+			checkElapsed: true,
+			verify: func(t *testing.T, p *Program, origWriter io.WriteCloser, _ io.Reader) {
+				assert.False(t, p.running, "timeout should mark the program as not running")
+				assert.True(t, ownedPipeCleanupCalled.Load(), "timeout should kill the presumed-wedged process")
+
+				// The pipe should have been replaced, not just left pointing
+				// at the still-blocked original writer.
+				assert.NotSame(t, origWriter, p.inputWriter)
+			},
+		},
+		"timeout leaves unowned pipe alone": {
+			build: func(t *testing.T) *Program {
+				origWriter := newBlockingWriteCloser()
+				t.Cleanup(func() { origWriter.Close() })
+
+				return &Program{
+					inputWriter: origWriter,
+					inputReader: strings.NewReader(""),
+					ownsPipe:    false, // as set by WithReaderWriter
+					running:     true,
+					cleanup:     func() error { return nil },
+				}
+			},
+			wantErr: "stdin write timed out",
+			verify: func(t *testing.T, p *Program, origWriter io.WriteCloser, origReader io.Reader) {
+				// Callers that supplied their own reader/writer via
+				// WithReaderWriter own that lifecycle; resetPipe must not
+				// touch it.
+				assert.Same(t, origWriter, p.inputWriter)
+				assert.Same(t, origReader, p.inputReader)
+			},
+		},
+		"nil writer is a no-op": {
+			build: func(*testing.T) *Program {
+				return &Program{inputWriter: nil}
+			},
 		},
 	}
 
-	start := time.Now()
-	err := p.sendToStdin("hello")
-	elapsed := time.Since(start)
+	for name, tc := range tests {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
 
-	require.Error(t, err)
-	assert.Contains(t, err.Error(), "stdin write timed out")
-	assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond)
-	assert.False(t, p.running, "timeout should mark the program as not running")
-	assert.True(t, cleanupCalled.Load(), "timeout should kill the presumed-wedged process")
+			p := tc.build(t)
+			origWriter, origReader := p.inputWriter, p.inputReader
 
-	// The pipe should have been replaced, not just left pointing at the
-	// still-blocked original writer.
-	assert.NotSame(t, origWriter, p.inputWriter)
-}
+			start := time.Now()
+			err := p.sendToStdin("hello")
+			elapsed := time.Since(start)
 
-func TestSendToStdin_TimeoutLeavesUnownedPipeAlone(t *testing.T) {
-	t.Parallel()
-
-	origWriter := newBlockingWriteCloser()
-	defer origWriter.Close()
-	origReader := strings.NewReader("")
-
-	p := &Program{
-		inputWriter: origWriter,
-		inputReader: origReader,
-		ownsPipe:    false, // as set by WithReaderWriter
-		running:     true,
-		cleanup:     func() error { return nil },
+			if tc.wantErr == "" {
+				require.NoError(t, err)
+			} else {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), tc.wantErr)
+			}
+			if tc.checkElapsed {
+				assert.GreaterOrEqual(t, elapsed, 750*time.Millisecond)
+			}
+			if tc.verify != nil {
+				tc.verify(t, p, origWriter, origReader)
+			}
+		})
 	}
-
-	err := p.sendToStdin("hello")
-	require.Error(t, err)
-
-	// Callers that supplied their own reader/writer via WithReaderWriter own
-	// that lifecycle; resetPipe must not touch it.
-	assert.Same(t, origWriter, p.inputWriter)
-	assert.Same(t, io.Reader(origReader), p.inputReader)
 }
 
 func TestResetPipe(t *testing.T) {
