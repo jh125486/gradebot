@@ -1,7 +1,6 @@
 # Gradebot
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/jh125486/gradebot)](https://pkg.go.dev/github.com/jh125486/gradebot)
-[![Go Report](https://goreportcard.com/badge/github.com/jh125486/gradebot)](https://goreportcard.com/report/github.com/jh125486/gradebot)
 [![Tests](https://github.com/jh125486/gradebot/actions/workflows/test.yaml/badge.svg)](https://github.com/jh125486/gradebot/actions/workflows/test.yaml)
 [![CodeQL](https://github.com/jh125486/gradebot/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/jh125486/gradebot/actions/workflows/codeql-analysis.yml)
 [![Codecov](https://codecov.io/gh/jh125486/gradebot/branch/main/graph/badge.svg)](https://codecov.io/gh/jh125486/gradebot)
