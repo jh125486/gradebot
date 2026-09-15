@@ -3,9 +3,18 @@ package rubrics
 import (
 	"context"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
+	"time"
 )
+
+// processReapTimeout bounds how long ProcessKill waits for the killed
+// process to actually exit. SIGKILL is unblockable, so in practice this
+// should return almost immediately; the bound exists only to guarantee
+// ProcessKill can't hang forever in the pathological case of a process
+// stuck in uninterruptible sleep.
+const processReapTimeout = 3 * time.Second
 
 // Commander defines an interface that wraps an external command.
 // This is a subset of exec.Cmd to allow for mocking.
@@ -60,30 +69,50 @@ func (c *execCmd) SetStderr(stderr io.Writer) {
 	c.Stderr = stderr
 }
 
-// ProcessKill terminates the process group led by the child process and
-// reaps it. Killing the whole group (not just the direct child) catches
-// subprocesses the child may have spawned, e.g. a student program run via a
-// shell wrapper.
+// ProcessKill terminates the child process and reaps it so it doesn't
+// linger as a zombie. On POSIX it also kills the process group the child
+// leads, catching subprocesses the child may have spawned (e.g. a student
+// program run via a shell wrapper); Windows (runner_windows.go) has no
+// process-group equivalent here and only kills the direct child.
 //
 // Reaping uses Process.Wait, not Cmd.Wait: when Stdin isn't an *os.File
 // (Program's default is an unwritten *io.PipeReader), Cmd.Wait also blocks
 // until the stdin-copy goroutine returns, and per the exec package docs
-// that can block on a Read from Stdin *regardless* of WaitDelay -- nothing
+// that can block on a Read from Stdin regardless of WaitDelay -- nothing
 // closes our own pipe until later, in Program.Kill's resetPipe. Process.Wait
-// reaps the OS-level zombie directly without waiting on that goroutine at
-// all, so ProcessKill can't be blocked by it.
+// reaps the OS-level zombie directly without waiting on that goroutine, so
+// ProcessKill can't be blocked by it; it's further bounded by
+// processReapTimeout in case the killed process doesn't exit promptly.
+// Once Cmd.Wait's usual unblocking condition does occur (immediately, via
+// resetPipe, or whenever this Commander is otherwise abandoned), a
+// background Cmd.Wait call releases the I/O pipes/copy goroutines Cmd
+// itself owns.
 func (c *execCmd) ProcessKill() error {
+	if c.Process == nil {
+		return nil
+	}
 	c.killOnce.Do(func() {
-		if c.Process == nil {
-			return
-		}
 		err := killProcessGroup(c.Cmd)
-		_, _ = c.Process.Wait() // best-effort reap; ignore "already reaped" etc.
+		reapWithTimeout(c.Process, processReapTimeout)
+		go func() { _ = c.Wait() }() // best-effort I/O pipe cleanup, see doc comment
 		if err != nil && !isAlreadyExited(err) {
 			c.killErr = err
 		}
 	})
 	return c.killErr
+}
+
+// reapWithTimeout waits for proc to exit, giving up after d elapses.
+func reapWithTimeout(proc *os.Process, d time.Duration) {
+	done := make(chan struct{})
+	go func() {
+		_, _ = proc.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(d):
+	}
 }
 
 // Start starts the command without waiting for it to exit. This allows callers

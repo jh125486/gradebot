@@ -202,9 +202,9 @@ func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []st
 	if p.commandBuilder != nil {
 		cmd = p.commandBuilder(cmdName, cmdArgs...)
 	} else {
-		cmd = &execCmd{
-			Cmd: exec.CommandContext(p.spawnCtx, cmdName, cmdArgs...),
-		}
+		osCmd := exec.CommandContext(p.spawnCtx, cmdName, cmdArgs...)
+		setProcAttr(osCmd)
+		cmd = &execCmd{Cmd: osCmd}
 	}
 	cmd.SetDir(p.workDir)
 	cmd.SetEnv(p.env)

@@ -3,7 +3,6 @@
 package rubrics
 
 import (
-	"errors"
 	"os/exec"
 	"syscall"
 )
@@ -19,18 +18,15 @@ func setProcAttr(cmd *exec.Cmd) {
 	cmd.SysProcAttr.Setpgid = true
 }
 
-// killProcessGroup sends SIGKILL to the process group led by cmd's process,
-// killing the process and any children it spawned. Go's fork/exec
-// synchronizes over a pipe that only closes after execve, and Setpgid runs
-// in the child before that -- so by the time Start() returns, the group is
-// already set up and there is no race to fall back for here. The fallback
-// to a direct kill exists only for genuinely unexpected errors (e.g. the
-// group's already gone for some reason other than a normal exit).
+// killProcessGroup sends SIGKILL to the process group led by cmd's process
+// (best-effort, to also catch any subprocesses it spawned), then
+// authoritatively kills the direct child via Process.Kill regardless of how
+// the group signal went. Treating a failed/ESRCH'd group signal as
+// sufficient on its own would risk leaving the direct child alive with
+// nothing left to kill it, hanging the caller's subsequent Wait; always
+// falling through to the direct, well-tested Process.Kill avoids that.
 func killProcessGroup(cmd *exec.Cmd) error {
 	pid := cmd.Process.Pid
-	err := syscall.Kill(-pid, syscall.SIGKILL)
-	if err == nil || errors.Is(err, syscall.ESRCH) || isAlreadyExited(err) {
-		return nil
-	}
+	_ = syscall.Kill(-pid, syscall.SIGKILL)
 	return cmd.Process.Kill()
 }
