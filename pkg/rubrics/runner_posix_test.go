@@ -1,13 +1,13 @@
-//go:build !windows
+//go:build unix
 
 package rubrics_test
 
 import (
+	"fmt"
 	"io"
 	"os"
-	"strconv"
+	"path/filepath"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -20,11 +20,20 @@ import (
 // down subprocesses spawned by the child (e.g. a student program run via a
 // shell wrapper), not just the direct child, by killing the whole process
 // group rather than a single pid.
+//
+// Liveness is checked through a delayed side effect (a marker file written
+// after a short sleep) rather than signaling the grandchild's pid directly:
+// killProcessGroup only reaps the direct shell, so the killed grandchild can
+// briefly remain an unreaped zombie, and a zombie still answers a signal-0
+// liveness probe as if it were alive.
 func TestExecCmd_ProcessKill_KillsGrandchild(t *testing.T) {
 	t.Parallel()
 
+	marker := filepath.Join(t.TempDir(), "grandchild-ran")
+	script := fmt.Sprintf(`(sleep 0.3 && : > %q) & echo $!; wait`, marker)
+
 	builder := &rubrics.ExecCommandBuilder{}
-	cmd := builder.New(t.Context(), "sh", "-c", "sleep 60 & echo $!; wait")
+	cmd := builder.New(t.Context(), "sh", "-c", script)
 
 	var stdout rubrics.SafeBuffer
 	cmd.SetStdout(&stdout)
@@ -32,35 +41,63 @@ func TestExecCmd_ProcessKill_KillsGrandchild(t *testing.T) {
 
 	require.NoError(t, cmd.Start())
 
-	grandchildPID := waitForGrandchildPID(t, &stdout)
+	waitForGrandchildStarted(t, &stdout)
 
 	require.NoError(t, cmd.ProcessKill())
 
-	require.Eventually(t, func() bool {
-		return !processAlive(grandchildPID)
-	}, time.Second, 10*time.Millisecond, "grandchild process survived ProcessKill")
+	// Wait well past the grandchild's scheduled side effect (0.3s) to prove
+	// it never got the chance to run: if ProcessKill only killed the direct
+	// shell, the backgrounded grandchild would still write the marker.
+	time.Sleep(600 * time.Millisecond)
+	_, err := os.Stat(marker)
+	require.ErrorIs(t, err, os.ErrNotExist, "grandchild survived ProcessKill and wrote its marker file")
 }
 
-func waitForGrandchildPID(t *testing.T, stdout interface{ String() string }) int {
+// waitForGrandchildStarted blocks until the shell script has echoed its
+// backgrounded grandchild's pid, confirming the grandchild actually forked
+// before the caller kills the group.
+func waitForGrandchildStarted(t *testing.T, stdout interface{ String() string }) {
 	t.Helper()
 
-	var pidLine string
 	require.Eventually(t, func() bool {
-		pidLine = strings.TrimSpace(stdout.String())
-		return pidLine != ""
-	}, time.Second, 10*time.Millisecond, "sh never printed the sleep pid")
-
-	pid, err := strconv.Atoi(pidLine)
-	require.NoError(t, err)
-	return pid
+		return strings.TrimSpace(stdout.String()) != ""
+	}, time.Second, 10*time.Millisecond, "sh never echoed the backgrounded grandchild's pid")
 }
 
-func processAlive(pid int) bool {
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false
-	}
-	return proc.Signal(syscall.Signal(0)) == nil
+// TestProgram_Kill_KillsGrandchild is the Program-level counterpart to
+// TestExecCmd_ProcessKill_KillsGrandchild: it exercises Program's actual,
+// non-test construction path in startCommand (a direct exec.CommandContext
+// call with its own setProcAttr wiring), not ExecCommandBuilder.New nor a
+// MockCommander. All other Program tests use MockCommander, so a regression
+// in that separate wiring -- e.g. someone adding a new Program construction
+// path and forgetting setProcAttr, as the original version of this PR did
+// -- would otherwise ship with every existing test still green.
+//
+// Deliberately not t.Parallel(): Program.Run changes the process-wide
+// working directory for the duration of starting the command (see
+// changeToWorkDir in program.go), which already races with other tests'
+// os.Chdir calls (e.g. TestProgram_Run's ChdirFails/PhysicalChdir cases) if
+// run concurrently with them -- a pre-existing issue unrelated to this
+// PR's process-cleanup fix. Running serially avoids adding to that window.
+func TestProgram_Kill_KillsGrandchild(t *testing.T) {
+	marker := filepath.Join(t.TempDir(), "grandchild-ran")
+	script := fmt.Sprintf(`(sleep 0.3 && : > %q) & echo $!; wait`, marker)
+
+	prog := rubrics.New(t.TempDir(), "")
+	require.NoError(t, prog.Run(t.Context(), "sh", "-c", script))
+
+	// Give the backgrounded grandchild time to fork (near-instant: the
+	// subshell backgrounds and echoes its pid before its own 0.3s sleep
+	// even starts) before killing the group.
+	time.Sleep(150 * time.Millisecond)
+
+	require.NoError(t, prog.Kill())
+
+	// Wait well past the grandchild's scheduled side effect (0.3s) to prove
+	// it never got the chance to run.
+	time.Sleep(600 * time.Millisecond)
+	_, err := os.Stat(marker)
+	require.ErrorIs(t, err, os.ErrNotExist, "grandchild survived Program.Kill and wrote its marker file")
 }
 
 // TestExecCmd_ProcessKill_OpenStdinPipeDoesNotDeadlock reproduces Program's

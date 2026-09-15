@@ -2,6 +2,7 @@ package rubrics
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -72,46 +73,69 @@ func (c *execCmd) SetStderr(stderr io.Writer) {
 // ProcessKill terminates the child process and reaps it so it doesn't
 // linger as a zombie. On POSIX it also kills the process group the child
 // leads, catching subprocesses the child may have spawned (e.g. a student
-// program run via a shell wrapper); Windows (runner_windows.go) has no
+// program run via a shell wrapper); Windows and other non-Unix targets
+// (runner_windows.go, runner_other.go) have no
 // process-group equivalent here and only kills the direct child.
 //
-// Reaping uses Process.Wait, not Cmd.Wait: when Stdin isn't an *os.File
-// (Program's default is an unwritten *io.PipeReader), Cmd.Wait also blocks
-// until the stdin-copy goroutine returns, and per the exec package docs
-// that can block on a Read from Stdin regardless of WaitDelay -- nothing
-// closes our own pipe until later, in Program.Kill's resetPipe. Process.Wait
-// reaps the OS-level zombie directly without waiting on that goroutine, so
-// ProcessKill can't be blocked by it; it's further bounded by
-// processReapTimeout in case the killed process doesn't exit promptly.
-// Once Cmd.Wait's usual unblocking condition does occur (immediately, via
-// resetPipe, or whenever this Commander is otherwise abandoned), a
-// background Cmd.Wait call releases the I/O pipes/copy goroutines Cmd
-// itself owns.
+// If the process was already reaped by an earlier Run/Wait (c.ProcessState
+// set), ProcessKill is a no-op: the OS may since have recycled that pid for
+// an unrelated process, so it's no longer safe to signal it as a group.
+//
+// Reaping goes through the single real exec.Cmd.Wait -- not a separate
+// Process.Wait -- so there's exactly one wait owner and Cmd's own I/O-pipe
+// cleanup reliably runs. Cmd.Wait would normally be able to block forever
+// here: when Stdin isn't an *os.File (Program's default is an unwritten
+// *io.PipeReader), Wait also waits for the stdin-copy goroutine, which can
+// block on a Read from Stdin regardless of WaitDelay. So before waiting,
+// ProcessKill proactively closes Stdin itself (when it's not an *os.File
+// and implements io.Closer) to unblock that goroutine. The wait is further
+// bounded by processReapTimeout as a last-resort safety net and, unlike a
+// silently-discarded background wait, a timeout is reported as an error
+// rather than treated as a successful kill.
 func (c *execCmd) ProcessKill() error {
 	if c.Process == nil {
 		return nil
 	}
 	c.killOnce.Do(func() {
-		err := killProcessGroup(c.Cmd)
-		reapWithTimeout(c.Process, processReapTimeout)
-		go func() { _ = c.Wait() }() // best-effort I/O pipe cleanup, see doc comment
-		if err != nil && !isAlreadyExited(err) {
-			c.killErr = err
+		if c.ProcessState != nil {
+			return
+		}
+
+		killErr := killProcessGroup(c.Cmd)
+		unblockStdinCopy(c.Cmd)
+
+		done := make(chan struct{})
+		go func() {
+			_ = c.Wait() // expected to report the process was killed; that's fine
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(processReapTimeout):
+			c.killErr = fmt.Errorf("process %d did not exit within %s of being killed", c.Process.Pid, processReapTimeout)
+			return
+		}
+
+		if killErr != nil && !isAlreadyExited(killErr) {
+			c.killErr = killErr
 		}
 	})
 	return c.killErr
 }
 
-// reapWithTimeout waits for proc to exit, giving up after d elapses.
-func reapWithTimeout(proc *os.Process, d time.Duration) {
-	done := make(chan struct{})
-	go func() {
-		_, _ = proc.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-	case <-time.After(d):
+// unblockStdinCopy closes cmd's Stdin if doing so is necessary and safe:
+// necessary because exec.Cmd's internal stdin-copy goroutine can otherwise
+// block Wait forever on a Read that nothing will ever satisfy or error out
+// (e.g. Program's owned, unwritten io.Pipe); safe because when Stdin is an
+// *os.File, exec.Cmd connects it to the child directly with no copy
+// goroutine involved, so closing it here would only take away a file the
+// caller may still want and buys nothing.
+func unblockStdinCopy(cmd *exec.Cmd) {
+	if _, isFile := cmd.Stdin.(*os.File); isFile {
+		return
+	}
+	if closer, ok := cmd.Stdin.(io.Closer); ok {
+		_ = closer.Close()
 	}
 }
 

@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix
 
 package rubrics
 
@@ -25,6 +25,17 @@ func setProcAttr(cmd *exec.Cmd) {
 // sufficient on its own would risk leaving the direct child alive with
 // nothing left to kill it, hanging the caller's subsequent Wait; always
 // falling through to the direct, well-tested Process.Kill avoids that.
+//
+// The caller (execCmd.ProcessKill) only reaches this once per Commander and
+// only while c.ProcessState is still nil, i.e. before anything has reaped
+// this pid -- so it can't yet have been recycled by the OS for an unrelated
+// process. That still leaves an unavoidable, narrow TOCTOU between reading
+// cmd.Process.Pid here and the kernel processing this signal (the process
+// could exit and its pid get reused in between); Process.Kill itself is
+// safe against that on platforms where Go's exec package binds the kill to
+// a process handle rather than a bare pid, but the raw pid-group signal
+// below has no such protection. That residual risk is accepted as the
+// unavoidable cost of using pid-based process-group signaling at all.
 func killProcessGroup(cmd *exec.Cmd) error {
 	pid := cmd.Process.Pid
 	_ = syscall.Kill(-pid, syscall.SIGKILL)
