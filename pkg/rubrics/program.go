@@ -373,16 +373,18 @@ func (p *Program) Kill() error {
 
 	// exec.Cmd spawns a background goroutine that copies from inputReader
 	// into the child's real stdin whenever Stdin isn't an *os.File. That
-	// goroutine only exits once Wait() sees the process exit and closes its
-	// pipe -- but Kill() never waits, so the goroutine is left blocked
-	// reading from inputReader indefinitely. On restart, Run() hands the new
-	// process the *same* inputReader, so the new process's stdin-bridge
-	// goroutine now competes with the still-blocked old one for every future
-	// write on the pipe: a write can be silently handed to the dead
-	// goroutine and lost instead of reaching the live process, permanently
-	// desyncing the command/response stream. resetPipe closes the old writer
-	// (releasing that goroutine with EOF) and hands the next Run() a
-	// brand-new, uncontended pipe.
+	// goroutine only exits once inputReader returns EOF/an error -- Kill()
+	// itself never closes it, and p.cleanup (execCmd.ProcessKill) reaps the
+	// process via Process.Wait rather than Cmd.Wait specifically so it
+	// doesn't block on that goroutine either. So the goroutine is still
+	// blocked in Read(inputReader) when cleanup() returns. On restart,
+	// Run() hands the new process the *same* inputReader, so that still-
+	// blocked goroutine would compete with the new process's stdin-bridge
+	// goroutine for every future write on the pipe: a write can be silently
+	// handed to the dead goroutine and lost instead of reaching the live
+	// process, permanently desyncing the command/response stream. resetPipe
+	// closes the old writer (releasing the goroutine with EOF) and hands
+	// the next Run() a brand-new, uncontended pipe.
 	p.resetPipe()
 
 	return err

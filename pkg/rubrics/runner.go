@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os/exec"
+	"sync"
 )
 
 // Commander defines an interface that wraps an external command.
@@ -30,6 +31,13 @@ type (
 // execCmd is the production implementation of Commander, wrapping exec.Cmd.
 type execCmd struct {
 	*exec.Cmd
+
+	// killOnce makes ProcessKill idempotent and safe to call more than once
+	// on the same Commander (e.g. Program's sendToStdin can already invoke
+	// cleanup on a wedged write before a caller explicitly kills the same
+	// Commander again).
+	killOnce sync.Once
+	killErr  error
 }
 
 func (c *execCmd) SetDir(dir string) {
@@ -52,11 +60,30 @@ func (c *execCmd) SetStderr(stderr io.Writer) {
 	c.Stderr = stderr
 }
 
+// ProcessKill terminates the process group led by the child process and
+// reaps it. Killing the whole group (not just the direct child) catches
+// subprocesses the child may have spawned, e.g. a student program run via a
+// shell wrapper.
+//
+// Reaping uses Process.Wait, not Cmd.Wait: when Stdin isn't an *os.File
+// (Program's default is an unwritten *io.PipeReader), Cmd.Wait also blocks
+// until the stdin-copy goroutine returns, and per the exec package docs
+// that can block on a Read from Stdin *regardless* of WaitDelay -- nothing
+// closes our own pipe until later, in Program.Kill's resetPipe. Process.Wait
+// reaps the OS-level zombie directly without waiting on that goroutine at
+// all, so ProcessKill can't be blocked by it.
 func (c *execCmd) ProcessKill() error {
-	if c.Process != nil {
-		return c.Process.Kill()
-	}
-	return nil
+	c.killOnce.Do(func() {
+		if c.Process == nil {
+			return
+		}
+		err := killProcessGroup(c.Cmd)
+		_, _ = c.Process.Wait() // best-effort reap; ignore "already reaped" etc.
+		if err != nil && !isAlreadyExited(err) {
+			c.killErr = err
+		}
+	})
+	return c.killErr
 }
 
 // Start starts the command without waiting for it to exit. This allows callers
@@ -97,6 +124,7 @@ type ExecCommandBuilder struct {
 // ctx explicitly and drop any use of the removed Context field.
 func (b *ExecCommandBuilder) New(ctx context.Context, name string, args ...string) Commander {
 	cmd := exec.CommandContext(ctx, name, args...)
+	setProcAttr(cmd)
 	execCmd := &execCmd{Cmd: cmd}
 
 	if b.Env != nil {
