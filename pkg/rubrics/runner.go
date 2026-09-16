@@ -2,9 +2,20 @@ package rubrics
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"os"
 	"os/exec"
+	"sync"
+	"time"
 )
+
+// processReapTimeout bounds how long ProcessKill waits for the killed
+// process to actually exit. SIGKILL is unblockable, so in practice this
+// should return almost immediately; the bound exists only to guarantee
+// ProcessKill can't hang forever in the pathological case of a process
+// stuck in uninterruptible sleep.
+const processReapTimeout = 3 * time.Second
 
 // Commander defines an interface that wraps an external command.
 // This is a subset of exec.Cmd to allow for mocking.
@@ -30,6 +41,13 @@ type (
 // execCmd is the production implementation of Commander, wrapping exec.Cmd.
 type execCmd struct {
 	*exec.Cmd
+
+	// killOnce makes ProcessKill idempotent and safe to call more than once
+	// on the same Commander (e.g. Program's sendToStdin can already invoke
+	// cleanup on a wedged write before a caller explicitly kills the same
+	// Commander again).
+	killOnce sync.Once
+	killErr  error
 }
 
 func (c *execCmd) SetDir(dir string) {
@@ -52,11 +70,73 @@ func (c *execCmd) SetStderr(stderr io.Writer) {
 	c.Stderr = stderr
 }
 
+// ProcessKill terminates the child process and reaps it so it doesn't
+// linger as a zombie. On POSIX it also kills the process group the child
+// leads, catching subprocesses the child may have spawned (e.g. a student
+// program run via a shell wrapper); Windows and other non-Unix targets
+// (runner_windows.go, runner_other.go) have no
+// process-group equivalent here and only kills the direct child.
+//
+// If the process was already reaped by an earlier Run/Wait (c.ProcessState
+// set), ProcessKill is a no-op: the OS may since have recycled that pid for
+// an unrelated process, so it's no longer safe to signal it as a group.
+//
+// Reaping goes through the single real exec.Cmd.Wait -- not a separate
+// Process.Wait -- so there's exactly one wait owner and Cmd's own I/O-pipe
+// cleanup reliably runs. Cmd.Wait would normally be able to block forever
+// here: when Stdin isn't an *os.File (Program's default is an unwritten
+// *io.PipeReader), Wait also waits for the stdin-copy goroutine, which can
+// block on a Read from Stdin regardless of WaitDelay. So before waiting,
+// ProcessKill proactively closes Stdin itself (when it's not an *os.File
+// and implements io.Closer) to unblock that goroutine. The wait is further
+// bounded by processReapTimeout as a last-resort safety net and, unlike a
+// silently-discarded background wait, a timeout is reported as an error
+// rather than treated as a successful kill.
 func (c *execCmd) ProcessKill() error {
-	if c.Process != nil {
-		return c.Process.Kill()
+	if c.Process == nil {
+		return nil
 	}
-	return nil
+	c.killOnce.Do(func() {
+		if c.ProcessState != nil {
+			return
+		}
+
+		killErr := killProcessGroup(c.Cmd)
+		unblockStdinCopy(c.Cmd)
+
+		done := make(chan struct{})
+		go func() {
+			_ = c.Wait() // expected to report the process was killed; that's fine
+			close(done)
+		}()
+		select {
+		case <-done:
+		case <-time.After(processReapTimeout):
+			c.killErr = fmt.Errorf("process %d did not exit within %s of being killed", c.Process.Pid, processReapTimeout)
+			return
+		}
+
+		if killErr != nil && !isAlreadyExited(killErr) {
+			c.killErr = killErr
+		}
+	})
+	return c.killErr
+}
+
+// unblockStdinCopy closes cmd's Stdin if doing so is necessary and safe:
+// necessary because exec.Cmd's internal stdin-copy goroutine can otherwise
+// block Wait forever on a Read that nothing will ever satisfy or error out
+// (e.g. Program's owned, unwritten io.Pipe); safe because when Stdin is an
+// *os.File, exec.Cmd connects it to the child directly with no copy
+// goroutine involved, so closing it here would only take away a file the
+// caller may still want and buys nothing.
+func unblockStdinCopy(cmd *exec.Cmd) {
+	if _, isFile := cmd.Stdin.(*os.File); isFile {
+		return
+	}
+	if closer, ok := cmd.Stdin.(io.Closer); ok {
+		_ = closer.Close()
+	}
 }
 
 // Start starts the command without waiting for it to exit. This allows callers
@@ -97,6 +177,7 @@ type ExecCommandBuilder struct {
 // ctx explicitly and drop any use of the removed Context field.
 func (b *ExecCommandBuilder) New(ctx context.Context, name string, args ...string) Commander {
 	cmd := exec.CommandContext(ctx, name, args...)
+	setProcAttr(cmd)
 	execCmd := &execCmd{Cmd: cmd}
 
 	if b.Env != nil {
