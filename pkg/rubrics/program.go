@@ -208,7 +208,7 @@ func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []st
 	}
 	cmd.SetDir(p.workDir)
 	cmd.SetEnv(p.env)
-	cmd.SetStdin(p.inputReader)
+	cmd.SetStdin(p.stdinForCommand())
 	cmd.SetStdout(&p.out)
 	cmd.SetStderr(&p.errOut)
 
@@ -225,8 +225,46 @@ func (p *Program) startCommand(ctx context.Context, cmdName string, cmdArgs []st
 	}
 
 	p.running = true
+
+	// exec.CommandContext's default behavior on context cancellation is to
+	// call Process.Kill on just the direct child, with nothing left to reap
+	// it afterward -- neither piece of that is enough (see ProcessKill's
+	// doc comment for why both matter). Real callers drive process lifetime
+	// through spawnCtx expiring rather than an explicit Kill call (e.g. the
+	// top-level context canceled on SIGINT/SIGTERM), so without this watch
+	// a killed student process's whole reason for having group-kill/reap
+	// logic at all -- being reliably cleaned up -- would only ever trigger
+	// for callers that happen to call Kill directly. Restricted to the
+	// production path (no test commandBuilder) since MockCommander-based
+	// tests don't expect extra, asynchronous ProcessKill calls.
+	if p.commandBuilder == nil {
+		go func(ctx context.Context) {
+			<-ctx.Done()
+			_ = p.Kill()
+		}(p.spawnCtx)
+	}
+
 	return nil
 }
+
+// stdinForCommand returns the reader to hand the next Commander as Stdin.
+// When Program owns the pipe (the default), the raw *io.PipeReader is
+// returned as-is: closing it under ProcessKill's best-effort stdin-unblock
+// (see runner.go) is fine, since resetPipe discards it right after anyway.
+// When the reader was supplied by a caller via WithReaderWriter, the caller
+// owns its lifecycle and expects to reuse it across multiple Run calls;
+// wrapping it hides any io.Closer it implements so that same stdin-unblock
+// logic can't close a reader that isn't ours to close.
+func (p *Program) stdinForCommand() io.Reader {
+	if p.ownsPipe {
+		return p.inputReader
+	}
+	return stdinNoClose{p.inputReader}
+}
+
+// stdinNoClose adapts an io.Reader so it no longer satisfies io.Closer,
+// even if the wrapped value does.
+type stdinNoClose struct{ io.Reader }
 
 // Do sends input to the running program and returns captured output
 func (p *Program) Do(in string) (stdout, stderr []string, err error) {
@@ -372,19 +410,17 @@ func (p *Program) Kill() error {
 	}
 
 	// exec.Cmd spawns a background goroutine that copies from inputReader
-	// into the child's real stdin whenever Stdin isn't an *os.File. That
-	// goroutine only exits once inputReader returns EOF/an error -- Kill()
-	// itself never closes it, and p.cleanup (execCmd.ProcessKill) reaps the
-	// process via Process.Wait rather than Cmd.Wait specifically so it
-	// doesn't block on that goroutine either. So the goroutine is still
-	// blocked in Read(inputReader) when cleanup() returns. On restart,
-	// Run() hands the new process the *same* inputReader, so that still-
-	// blocked goroutine would compete with the new process's stdin-bridge
-	// goroutine for every future write on the pipe: a write can be silently
-	// handed to the dead goroutine and lost instead of reaching the live
-	// process, permanently desyncing the command/response stream. resetPipe
-	// closes the old writer (releasing the goroutine with EOF) and hands
-	// the next Run() a brand-new, uncontended pipe.
+	// into the child's real stdin whenever Stdin isn't an *os.File. p.cleanup
+	// (execCmd.ProcessKill) already closes that reader itself, when it's
+	// safe to (see stdinForCommand/unblockStdinCopy), and waits for the
+	// goroutine to exit as part of its single Cmd.Wait call -- so by the
+	// time cleanup() returns here, that goroutine is already gone for the
+	// commander p.cleanup just killed. What resetPipe is still needed for:
+	// p.inputReader/inputWriter are Program-level fields shared across
+	// every respawn, so the NEXT Run() would otherwise hand a fresh process
+	// the very reader that was just closed. resetPipe swaps in a brand-new,
+	// unclosed pipe (when Program owns it) so that next process's own
+	// stdin-bridge goroutine has something live to read from.
 	p.resetPipe()
 
 	return err

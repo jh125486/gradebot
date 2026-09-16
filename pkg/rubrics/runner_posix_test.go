@@ -3,6 +3,7 @@
 package rubrics_test
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -80,16 +81,23 @@ func waitForGrandchildStarted(t *testing.T, stdout interface{ String() string })
 // run concurrently with them -- a pre-existing issue unrelated to this
 // PR's process-cleanup fix. Running serially avoids adding to that window.
 func TestProgram_Kill_KillsGrandchild(t *testing.T) {
-	marker := filepath.Join(t.TempDir(), "grandchild-ran")
-	script := fmt.Sprintf(`(sleep 0.3 && : > %q) & echo $!; wait`, marker)
+	dir := t.TempDir()
+	started := filepath.Join(dir, "grandchild-started")
+	marker := filepath.Join(dir, "grandchild-ran")
+	script := fmt.Sprintf(`(: > %q; sleep 0.3 && : > %q) & wait`, started, marker)
 
 	prog := rubrics.New(t.TempDir(), "")
 	require.NoError(t, prog.Run(t.Context(), "sh", "-c", script))
 
-	// Give the backgrounded grandchild time to fork (near-instant: the
-	// subshell backgrounds and echoes its pid before its own 0.3s sleep
-	// even starts) before killing the group.
-	time.Sleep(150 * time.Millisecond)
+	// Wait for the grandchild itself (not just the parent shell) to have
+	// actually started, rather than a fixed sleep: a fixed delay could
+	// elapse before the grandchild forks on a slow/loaded runner, in which
+	// case Program.Kill would kill the shell before the grandchild ever
+	// existed and this test would pass without proving anything.
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	}, time.Second, 10*time.Millisecond, "grandchild never started")
 
 	require.NoError(t, prog.Kill())
 
@@ -98,6 +106,42 @@ func TestProgram_Kill_KillsGrandchild(t *testing.T) {
 	time.Sleep(600 * time.Millisecond)
 	_, err := os.Stat(marker)
 	require.ErrorIs(t, err, os.ErrNotExist, "grandchild survived Program.Kill and wrote its marker file")
+}
+
+// TestProgram_ContextCancel_KillsGrandchild proves the actual, real-world
+// trigger for gradebot not cleaning up a student's program on exit: nothing
+// in this codebase calls ProgramRunner.Kill directly. Every real caller
+// drives a program's lifetime by canceling spawnCtx (e.g. the root context
+// tied to SIGINT/SIGTERM in main.go), and relied on exec.CommandContext's
+// default behavior on cancellation -- which only kills the direct child and
+// never reaps it. This test cancels the context instead of calling Kill,
+// and expects the same group-kill-and-reap guarantee as an explicit Kill.
+//
+// Not t.Parallel(), for the same os.Chdir reason as TestProgram_Kill_KillsGrandchild.
+func TestProgram_ContextCancel_KillsGrandchild(t *testing.T) {
+	dir := t.TempDir()
+	started := filepath.Join(dir, "grandchild-started")
+	marker := filepath.Join(dir, "grandchild-ran")
+	script := fmt.Sprintf(`(: > %q; sleep 0.3 && : > %q) & wait`, started, marker)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	prog := rubrics.New(t.TempDir(), "")
+	require.NoError(t, prog.Run(ctx, "sh", "-c", script))
+
+	require.Eventually(t, func() bool {
+		_, err := os.Stat(started)
+		return err == nil
+	}, time.Second, 10*time.Millisecond, "grandchild never started")
+
+	cancel()
+
+	// Wait well past the grandchild's scheduled side effect (0.3s) to prove
+	// it never got the chance to run.
+	time.Sleep(600 * time.Millisecond)
+	_, err := os.Stat(marker)
+	require.ErrorIs(t, err, os.ErrNotExist, "grandchild survived context cancellation and wrote its marker file")
 }
 
 // TestExecCmd_ProcessKill_OpenStdinPipeDoesNotDeadlock reproduces Program's
